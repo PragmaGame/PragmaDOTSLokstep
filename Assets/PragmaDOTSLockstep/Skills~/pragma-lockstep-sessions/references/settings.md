@@ -70,7 +70,8 @@ well; action games do not (no prediction or rollback in this package).
 ## Bandwidth
 
 - Upstream per client: one input message per tick with the input bytes, or a one-byte repeat flag when unchanged,
-  plus commands.
+  plus commands (header, payload and data; a command larger than a packet is fragmented and the whole stream behind
+  it waits for it, so keep per-tick commands small and send big lists once).
 - Downstream per client: one frame per tick. A frame lists only players with news (changed input, commands, join,
   leave): idle players cost nothing, an active player costs about its input size per tick.
 - Late join: the whole history is sent, limited by `MaxSendBytesPerUpdate` per update.

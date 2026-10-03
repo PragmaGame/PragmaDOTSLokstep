@@ -14,7 +14,8 @@ namespace Pragma.Lockstep
         protected override void OnCreate()
         {
             base.OnCreate();
-            var entity = EntityManager.CreateEntity(ComponentType.ReadWrite<LockstepLocalInput>(), ComponentType.ReadWrite<LockstepCommand>());
+            var entity = EntityManager.CreateEntity(ComponentType.ReadWrite<LockstepLocalInput>(), ComponentType.ReadWrite<LockstepCommand>(),
+                ComponentType.ReadWrite<LockstepCommandData>());
             EntityManager.SetName(entity, "LockstepLocalInput");
         }
     }

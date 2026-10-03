@@ -69,7 +69,7 @@ ECV, the view layer of the author's own DawnOfWar project, adapted to lockstep.
 |---|---|---|
 | The server orders input and never simulates | Server plugin confirms input per tick | `LockstepServer` closes ticks on its own clock |
 | Joins, leaves and commands inside the input stream | Player data and commands are RPCs in the confirmed input | Frame records with `Joined`, `Left`, `Commands` flags; players are entities created on the same tick everywhere |
-| Fixed-size per-tick input struct plus reliable commands | DSL `input`, `DeterministicCommand` | Any unmanaged struct (`LockstepPlayerInput`), `LockstepCommand` with a stable type hash; commands never repeat |
+| Fixed-size per-tick input struct plus reliable commands | DSL `input`, `DeterministicCommand` | Any unmanaged struct (`LockstepPlayerInput`), `LockstepCommand` with a stable type hash and data of any length; commands never repeat |
 | Button edges from the input history | `Button` keeps frame states | The simulation keeps the previous input: `GetPrevious<T>()`, `HasChanged()` |
 | Missing input is replaced, not waited for | `InputHardTolerance`, repeated input, `ReplacedByServer` | The previous input repeats immediately; `MaxInputWaitTicks` makes waiting opt-in |
 | Q16 fixed point, rounding multiplication, no implicit float | `FP` with `RawValue`, `(a*b + half) >> 16`, float cast is a compile error | `FixedPoint` with `rawValue`, half-up rounding, conversions from `float`/`double` explicit |
@@ -272,6 +272,16 @@ These came up while building on Entities; neither reference package deals with t
     segments when the grid version changes and plan again only when they are blocked. A grid was chosen over a
     fixed-point navmesh because it is simple to keep exact, cheap to change at run time (buildings) and easy to hash;
     a navmesh with a funnel algorithm would give smoother paths on large open maps.
+
+12. **Command data next to the commands.** A buffer element has a fixed size, so the payload struct stays inline
+    (up to 122 bytes) and lists of any length (the unit ids of an order) go to a second buffer, `LockstepCommandData`,
+    on the same entity; a command keeps the offset and length of its data. The network never limited this: the
+    framer fragments any message, and Netcode queues what its reliable window cannot take yet. Fixed lists capped by
+    the payload size made games split one order into several commands and stitch them back together; with data, an
+    order is one command. On the wire a command is type hash, payload, data length and data, and the client and the
+    server keep commands in that form, so the server checks and relays bytes without decoding them. Data starts on
+    8-byte boundaries in the buffer, with zeroed padding, so any element type reads aligned and the checksum sees the
+    same bytes everywhere.
 
 ## Limitations and future work
 

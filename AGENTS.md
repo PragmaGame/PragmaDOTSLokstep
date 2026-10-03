@@ -124,8 +124,10 @@ to a drive letter with `subst`.
 ## Tests
 
 - `Assets/Tests/Editor` is the EditMode suite: math accuracy and Burst equality, golden results, serialization,
-  checksums, simulation rules, navigation (pathfinder, Burst equality, obstacles, agents, a session), sessions (latency, jitter, late join, disconnects, desync attribution, replays),
-  presentation, GameObject views, offline mode and a real Netcode server with two clients.
+  checksums, simulation rules, navigation (pathfinder, Burst equality, obstacles, agents, a session), sessions
+  (latency, jitter, late join, disconnects, desync attribution, replays, commands with large data), presentation,
+  GameObject views, offline mode and a real Netcode server with two clients (including a command larger than the
+  reliable window).
 - The suite reaches internals through `InternalsVisibleTo` in `Runtime/AssemblyInfo.cs`.
 - `Assets/Tests/Editor/AssemblyInfo.cs` has `[assembly: DisableAutoCreation]`: test systems enter simulations only
   through `LockstepSimulationOptions.AdditionalSystems`. In `Support`, `SessionHarness` runs a server and clients over

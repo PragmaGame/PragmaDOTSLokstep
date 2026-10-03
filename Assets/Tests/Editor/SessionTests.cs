@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
+using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -158,6 +159,97 @@ namespace Pragma.Lockstep.Tests
                 Assert.Greater(sent, 0);
                 Assert.AreEqual(sent, TestUtility.PlayerState(a.Simulation, a.LocalSlot).commandSum);
                 Assert.AreEqual(sent, TestUtility.PlayerState(b.Simulation, a.LocalSlot).commandSum);
+            }
+        }
+
+        [Test]
+        public void CommandsWithLargeData_ArriveWholeOnEveryClient()
+        {
+            using (var session = new SessionHarness(Settings(minPlayers: 1), latency: 0.06, jitter: 0.05))
+            {
+                var a = session.AddClient();
+                session.Run(1, VaryingInput);
+                var b = session.AddClient();
+                var sentCount = 0;
+                var sentSum = 0L;
+                session.Run(4, (client, frame) =>
+                {
+                    VaryingInput(client, frame);
+                    if (client != a || frame % 41 != 0 || client.State != LockstepClientState.Running)
+                    {
+                        return;
+                    }
+                    // From nothing up to 64 KB: far beyond one packet, fragmented and reassembled on the way.
+                    var values = new int[frame * 977 % 16384];
+                    for (var i = 0; i < values.Length; i++)
+                    {
+                        values[i] = frame * 31 + i;
+                        sentSum += values[i];
+                    }
+                    using (var data = new NativeArray<int>(values, Allocator.Temp))
+                    {
+                        client.AddCommand(new TestCommand { value = 1 }, data);
+                    }
+                    sentCount += values.Length;
+                });
+                session.Run(2, VaryingInput);
+                // A late joiner gets every command again from the server's history.
+                var late = session.AddClient();
+                session.Run(4, VaryingInput);
+
+                Assert.Greater(sentCount, 20000);
+                Assert.IsEmpty(session.Desyncs);
+                var expected = TestUtility.PlayerState(a.Simulation, a.LocalSlot);
+                Assert.AreEqual(sentCount, expected.commandDataCount);
+                Assert.AreEqual(sentSum, expected.commandDataSum);
+                foreach (var client in new[] { b, late })
+                {
+                    var state = TestUtility.PlayerState(client.Simulation, a.LocalSlot);
+                    Assert.AreEqual(expected.commandDataCount, state.commandDataCount);
+                    Assert.AreEqual(expected.commandDataSum, state.commandDataSum);
+                    Assert.AreEqual(expected.commandDataHash, state.commandDataHash, "the elements arrive in order");
+                }
+                TestUtility.AssertSameChecksums(a, b, 20);
+                TestUtility.AssertSameChecksums(a, late, 20);
+            }
+        }
+
+        [Test]
+        public void TruncatedCommandData_IsAProtocolViolation()
+        {
+            using (var session = new SessionHarness(Settings(minPlayers: 1)))
+            {
+                var client = session.AddClient();
+                session.Run(1, VaryingInput);
+                var violations = new List<string>();
+                session.Server.ProtocolViolationEvent += (_, reason) => violations.Add(reason);
+
+                // An input message whose only command announces 1000 bytes of data and carries 4.
+                using (var packet = new NativeList<byte>(64, Allocator.Temp))
+                {
+                    var writer = new LockstepByteWriter(packet);
+                    writer.WriteByte(0); // framer header: a complete message
+                    writer.WriteByte((byte)LockstepMessageType.Input);
+                    writer.WriteInt(session.Server.ClosedTicks + 2);
+                    writer.WriteByte(1);
+                    writer.WriteByte((byte)(LockstepInputTickFlags.Repeat | LockstepInputTickFlags.Commands));
+                    writer.WriteByte(1);
+                    writer.WriteInt(LockstepCommand.TypeHashOf<TestCommand>());
+                    writer.WriteByte(4);
+                    writer.WriteInt(1000);
+                    writer.WriteVarUInt(1000);
+                    writer.WriteInt(6);
+                    LogAssert.Expect(LogType.Warning, new Regex("sent invalid data"));
+                    unsafe
+                    {
+                        session.Server.OnPacket(1, packet.GetUnsafePtr(), packet.Length, session.Time);
+                    }
+                }
+                session.Run(1, VaryingInput);
+
+                Assert.AreEqual(1, violations.Count);
+                Assert.AreEqual(LockstepClientState.Running, client.State);
+                Assert.AreEqual(0, TestUtility.PlayerState(client.Simulation, client.LocalSlot).commandSum, "the broken command never reached a frame");
             }
         }
 

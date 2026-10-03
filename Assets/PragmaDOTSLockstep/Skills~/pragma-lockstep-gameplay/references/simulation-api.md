@@ -77,17 +77,23 @@ Client (presentation world):
 | API | Notes |
 |---|---|
 | `LockstepInputSystemGroup` | Client/local world group for input systems, before the session update |
-| `LockstepLocalInput` (singleton) | `Set<T>(in T)`, `Get<T>()`, `int size`; same entity holds a `LockstepCommand` buffer for outgoing commands |
-| `LockstepClient.SetInput<T>(in T)`, `AddCommand<T>(in T)`, `AddCommand(in LockstepCommand)` | The same from outside ECS |
+| `LockstepLocalInput` (singleton) | `Set<T>(in T)`, `Get<T>()`, `int size`; same entity holds the `LockstepCommand` and `LockstepCommandData` buffers for outgoing commands |
+| `LockstepClient.SetInput<T>(in T)`, `AddCommand<T>(in T)`, `AddCommand<T, TData>(in T, NativeArray<TData>)` | The same from outside ECS |
 
 `LockstepCommand`:
 
 | Member | Notes |
 |---|---|
 | `static LockstepCommand Create<T>(in T payload)` | Payload: unmanaged struct, at most `MAX_PAYLOAD_SIZE` (122) bytes |
-| `bool Is<T>()`, `bool TryGet<T>(out T)`, `T Get<T>()` | Decode in the simulation |
+| `static LockstepCommand Create<T, TData>(in T payload, NativeArray<TData> data, DynamicBuffer<LockstepCommandData> dataBuffer)` | Plus data of any length, appended to the `LockstepCommandData` buffer of the entity the command is added to |
+| `bool Is<T>()`, `bool TryGet<T>(out T)`, `T Get<T>()` | Decode the payload in the simulation |
+| `NativeArray<T> GetData<T>(DynamicBuffer<LockstepCommandData>)` | The data as `T` elements: a view valid until the buffer changes; trailing bytes short of a `T` are ignored |
+| `int DataLength` | Data size in bytes, 0 without data |
 | `static int TypeHashOf<T>()` | Stable 32-bit hash of the type's full name |
 | `int typeHash`, `byte size` | Raw fields |
+
+`LockstepCommandData` (buffer, `byte value`): the data of the commands of the same entity, back to back, each
+starting on an 8-byte boundary; on player entities and the local input entity, cleared with the commands.
 
 `LockstepProtocol` limits: `MAX_PLAYERS` 64, `MAX_INPUT_SIZE` 128, `MAX_COMMANDS_PER_TICK` 32 (per player; the rest
 moves to later ticks), `MAX_JOIN_DATA_SIZE` 62, `MAX_START_DATA_SIZE` 126.

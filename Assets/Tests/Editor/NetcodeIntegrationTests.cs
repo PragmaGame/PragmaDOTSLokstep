@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using NUnit.Framework;
 using Pragma.Lockstep.Netcode;
+using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Core;
 using Unity.Entities;
@@ -70,8 +71,8 @@ namespace Pragma.Lockstep.Tests
             }
         }
 
-        [Test]
-        public void ServerAndClients_RunASessionOverRpcs()
+        /// <summary>A server world hosting a session for two players and two client worlds joining it.</summary>
+        private (World Server, World ClientA, World ClientB) StartSession(ushort port)
         {
             var server = Track(ClientServerBootstrap.CreateServerWorld("Lockstep Test Server"));
             var clientA = Track(ClientServerBootstrap.CreateClientWorld("Lockstep Test Client A"));
@@ -87,10 +88,17 @@ namespace Pragma.Lockstep.Tests
             LockstepNetcode.JoinSession(clientA, LockstepClientSettings.Default);
             LockstepNetcode.JoinSession(clientB, LockstepClientSettings.Default);
 
-            var endpoint = NetworkEndpoint.LoopbackIpv4.WithPort(7971);
+            var endpoint = NetworkEndpoint.LoopbackIpv4.WithPort(port);
             Assert.IsTrue(LockstepNetcode.Listen(server, endpoint));
             LockstepNetcode.Connect(clientA, endpoint);
             LockstepNetcode.Connect(clientB, endpoint);
+            return (server, clientA, clientB);
+        }
+
+        [Test]
+        public void ServerAndClients_RunASessionOverRpcs()
+        {
+            var (server, clientA, clientB) = StartSession(7971);
 
             var desyncs = 0;
             Tick(30);
@@ -133,6 +141,48 @@ namespace Pragma.Lockstep.Tests
             Tick(60);
             Assert.AreEqual(1, TestUtility.Count<LockstepPlayer>(a.Simulation.World.EntityManager));
             Assert.IsFalse(LockstepNetcode.TryGetClient(clientB, out _), "the disconnected client disposed its session");
+        }
+
+        [Test]
+        public void ACommandLargerThanTheReliableWindow_ReachesEveryClient()
+        {
+            var (_, clientA, clientB) = StartSession(7972);
+            Tick(60 * 3);
+            Assert.IsTrue(LockstepNetcode.TryGetClient(clientA, out var a), "client A joined");
+            Assert.IsTrue(LockstepNetcode.TryGetClient(clientB, out var b), "client B joined");
+            Assert.AreEqual(LockstepClientState.Running, a.State);
+            Assert.AreEqual(LockstepClientState.Running, b.State);
+
+            // 128 KB: 128 RPCs of 1 KB each way, several times what the reliable pipeline sends without acknowledgement.
+            const int count = 32 * 1024;
+            var values = new int[count];
+            var sum = 0L;
+            for (var i = 0; i < count; i++)
+            {
+                values[i] = i * 7;
+                sum += values[i];
+            }
+            using (var data = new NativeArray<int>(values, Allocator.Temp))
+            {
+                a.AddCommand(new TestCommand { value = 1 }, data);
+            }
+            Tick(60 * 3);
+
+            Assert.AreEqual(LockstepClientState.Running, a.State);
+            Assert.AreEqual(LockstepClientState.Running, b.State);
+            Assert.IsFalse(a.IsDesynced || b.IsDesynced);
+            foreach (var client in new[] { a, b })
+            {
+                // The sessions run without test systems: replay what each client received with them.
+                using (var replay = LockstepReplay.Read(client.ExportReplay()))
+                using (var player = new LockstepReplayPlayer(replay, TestUtility.Options(typeof(TestGameplaySystem))) { VerifyChecksums = false })
+                {
+                    player.SimulateToEnd();
+                    var state = TestUtility.PlayerState(player.Simulation, a.LocalSlot);
+                    Assert.AreEqual(count, state.commandDataCount);
+                    Assert.AreEqual(sum, state.commandDataSum);
+                }
+            }
         }
     }
 }

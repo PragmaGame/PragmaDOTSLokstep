@@ -5,7 +5,7 @@ namespace Pragma.Lockstep
     public static class LockstepProtocol
     {
         /// <summary>Bumped on every incompatible change of the messages below.</summary>
-        public const ushort VERSION = 1;
+        public const ushort VERSION = 2;
 
         /// <summary>Player slots fit into a 64-bit mask.</summary>
         public const int MAX_PLAYERS = 64;

@@ -13,7 +13,8 @@ namespace Pragma.Lockstep.Tests
             public LockstepFrameRecordFlags flags;
             public byte[] joinData = Array.Empty<byte>();
             public byte[] input = Array.Empty<byte>();
-            public readonly List<LockstepCommand> commands = new List<LockstepCommand>();
+            // Wire form, as the server relays them.
+            public readonly List<byte[]> commands = new List<byte[]>();
         }
 
         private readonly SortedDictionary<int, Record> _records = new SortedDictionary<int, Record>();
@@ -48,7 +49,20 @@ namespace Pragma.Lockstep.Tests
         {
             var record = Get(slot);
             record.flags |= LockstepFrameRecordFlags.Commands;
-            record.commands.Add(LockstepCommand.Create(payload));
+            record.commands.Add(LockstepCommandWire.Encode(LockstepCommand.Create(payload), null, 0));
+            return this;
+        }
+
+        public FrameBuilder Command<T, TData>(int slot, T payload, params TData[] data)
+            where T : unmanaged
+            where TData : unmanaged
+        {
+            var record = Get(slot);
+            record.flags |= LockstepFrameRecordFlags.Commands;
+            fixed (TData* elements = data)
+            {
+                record.commands.Add(LockstepCommandWire.Encode(LockstepCommand.Create(payload), (byte*)elements, data.Length * UnsafeUtility.SizeOf<TData>()));
+            }
             return this;
         }
 
@@ -58,7 +72,6 @@ namespace Pragma.Lockstep.Tests
             {
                 var writer = new LockstepByteWriter(buffer);
                 writer.WriteByte((byte)_records.Count);
-                var payload = stackalloc byte[LockstepCommand.MAX_PAYLOAD_SIZE];
                 foreach (var pair in _records)
                 {
                     var record = pair.Value;
@@ -84,10 +97,10 @@ namespace Pragma.Lockstep.Tests
                         writer.WriteByte((byte)record.commands.Count);
                         foreach (var command in record.commands)
                         {
-                            writer.WriteInt(command.typeHash);
-                            writer.WriteByte(command.size);
-                            command.CopyPayloadTo(payload);
-                            writer.WriteBytes(payload, command.size);
+                            fixed (byte* bytes = command)
+                            {
+                                writer.WriteBytes(bytes, command.Length);
+                            }
                         }
                     }
                 }

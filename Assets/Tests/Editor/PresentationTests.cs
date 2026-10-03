@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Core;
 using Unity.Entities;
@@ -117,6 +118,54 @@ namespace Pragma.Lockstep.Tests
                 }
                 world.Update();
                 Assert.IsFalse(LockstepWorlds.TryGetClient(world, out _), "removing the config ends the session");
+            }
+        }
+
+        [Test]
+        public void LocalInputEntity_SendsCommandsWithTheirData()
+        {
+            using (var world = new World("Offline", WorldFlags.Game))
+            {
+                DefaultWorldInitialization.AddSystemsToRootLevelSystemGroups(world, typeof(LockstepInputSystemGroup), typeof(LockstepOfflineSystem));
+                var entityManager = world.EntityManager;
+                entityManager.CreateSingleton(LockstepOfflineConfig.Create<TestInput>(30));
+
+                using (var query = entityManager.CreateEntityQuery(typeof(LockstepLocalInput), typeof(LockstepCommand), typeof(LockstepCommandData)))
+                {
+                    var time = 0.0;
+                    for (var frame = 0; frame < 120; frame++)
+                    {
+                        if (frame == 30)
+                        {
+                            var entity = query.GetSingletonEntity();
+                            var data = entityManager.GetBuffer<LockstepCommandData>(entity);
+                            var commands = entityManager.GetBuffer<LockstepCommand>(entity);
+                            using (var first = new NativeArray<int>(new[] { 4, 5, 6 }, Allocator.Temp))
+                            using (var second = new NativeArray<int>(new[] { 7 }, Allocator.Temp))
+                            {
+                                commands.Add(LockstepCommand.Create(new TestCommand { value = 2 }, first, data));
+                                commands.Add(LockstepCommand.Create(new TestCommand { value = 3 }, second, data));
+                            }
+                        }
+                        time += 1 / 60.0;
+                        world.SetTime(new TimeData(time, 1 / 60f));
+                        world.Update();
+                    }
+                    Assert.AreEqual(0, entityManager.GetBuffer<LockstepCommandData>(query.GetSingletonEntity()).Length, "sent data is cleared");
+                }
+
+                // The session runs without test systems: replay what it recorded with them.
+                Assert.IsTrue(LockstepWorlds.TryGetClient(world, out var client));
+                using (var replay = LockstepReplay.Read(client.ExportReplay()))
+                using (var player = new LockstepReplayPlayer(replay, TestUtility.Options(typeof(TestGameplaySystem))) { VerifyChecksums = false })
+                {
+                    player.SimulateToEnd();
+                    var state = TestUtility.PlayerState(player.Simulation, 0);
+                    Assert.AreEqual(5, state.commandSum);
+                    Assert.AreEqual(4, state.commandDataCount);
+                    Assert.AreEqual(22, state.commandDataSum);
+                    Assert.AreEqual(((4u * 31 + 5) * 31 + 6) * 31 + 7, state.commandDataHash, "each command kept its own data");
+                }
             }
         }
     }

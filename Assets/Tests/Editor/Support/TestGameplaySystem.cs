@@ -24,7 +24,8 @@ namespace Pragma.Lockstep.Tests
 
             var time = SystemAPI.GetSingleton<LockstepTime>();
             ref var random = ref SystemAPI.GetSingletonRW<LockstepRandom>().ValueRW.value;
-            foreach (var (input, commands, player) in SystemAPI.Query<RefRO<LockstepPlayerInput>, DynamicBuffer<LockstepCommand>, RefRW<TestPlayerState>>())
+            foreach (var (input, commands, commandData, player) in
+                     SystemAPI.Query<RefRO<LockstepPlayerInput>, DynamicBuffer<LockstepCommand>, DynamicBuffer<LockstepCommandData>, RefRW<TestPlayerState>>())
             {
                 var current = input.ValueRO.Get<TestInput>();
                 var previous = input.ValueRO.GetPrevious<TestInput>();
@@ -43,6 +44,13 @@ namespace Pragma.Lockstep.Tests
                     if (commands[i].TryGet<TestCommand>(out var command))
                     {
                         playerState.commandSum += command.value;
+                        var data = commands[i].GetData<int>(commandData);
+                        for (var d = 0; d < data.Length; d++)
+                        {
+                            playerState.commandDataCount++;
+                            playerState.commandDataSum += data[d];
+                            playerState.commandDataHash = playerState.commandDataHash * 31 + (uint)data[d];
+                        }
                     }
                 }
                 playerState.randomSum += random.NextUInt(1000);

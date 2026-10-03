@@ -81,7 +81,8 @@ Order inside the group: `LockstepFrameApplySystem` -> `LockstepTransformHistoryS
 ## Players
 
 The frame apply system creates one entity per player on the join tick, with `LockstepPlayer` (`slot`, `joinTick`,
-`joinData`, `GetJoinData<T>()`), `LockstepPlayerInput`, a `LockstepCommand` buffer and two enableable flags:
+`joinData`, `GetJoinData<T>()`), `LockstepPlayerInput`, the `LockstepCommand` and `LockstepCommandData` buffers and
+two enableable flags:
 `LockstepPlayerJoined` (enabled only on the join tick) and `LockstepPlayerLeft` (enabled only on the leave tick; the
 entity is destroyed at the start of the next tick).
 
@@ -180,9 +181,33 @@ foreach (var (player, input, commands) in SystemAPI.Query<RefRO<LockstepPlayer>,
 }
 ```
 
+Lists of any length (the unit ids of an order, waypoints) are the command's data, never a `FixedList` capped by the
+payload size or a command split in chunks:
+
+```csharp
+// Client: the data goes into the LockstepCommandData buffer of the entity the command is added to.
+var commands = SystemAPI.GetSingletonBuffer<LockstepCommand>();
+var commandData = SystemAPI.GetSingletonBuffer<LockstepCommandData>();
+commands.Add(LockstepCommand.Create(new MoveCommand { target = target }, unitIds.AsArray(), commandData));
+
+// Simulation: query the data buffer next to the commands.
+foreach (var (player, commands, commandData) in
+         SystemAPI.Query<RefRO<LockstepPlayer>, DynamicBuffer<LockstepCommand>, DynamicBuffer<LockstepCommandData>>())
+{
+    for (var i = 0; i < commands.Length; i++)
+    {
+        if (commands[i].TryGet<MoveCommand>(out var move))
+        {
+            var unitIds = commands[i].GetData<uint>(commandData); // view; check each unit's owner before using it
+        }
+    }
+}
+```
+
 - The client samples input once per tick. A tap shorter than a tick can be missed: send must-not-miss actions as
   commands or latch them on the client until the next tick.
-- Command payloads are at most 122 bytes; a player sends at most 32 per tick and the rest move to later ticks.
+- Command payload structs are at most 122 bytes; their data has no limit (large commands are fragmented on the wire
+  and still arrive in one tick). A player sends at most 32 commands per tick and the rest move to later ticks.
 - Command types are identified by a hash of the assembly-qualified type name: renaming the struct, its namespace or
   its assembly changes the id, so all clients need the same build.
 
@@ -216,6 +241,7 @@ foreach (var (player, input, commands) in SystemAPI.Query<RefRO<LockstepPlayer>,
 | `SystemAPI.Time.DeltaTime`, `Time.time` | `LockstepTime.deltaTime`, `LockstepTime.tick`, tick counters |
 | `UnityEngine.Random`, `System.Random` | `LockstepRandom.value`, an `FixedRandom` in a component |
 | `Entity` in commands, sort keys, seeds, hash keys | `LockstepEntityId.value` |
+| A `FixedList` of ids in a command payload, orders split into chunks | Command data: `LockstepCommand.Create(payload, data, dataBuffer)`, `GetData<T>` |
 | `LocalTransform` for gameplay | `LockstepTransform` |
 | Unity Physics queries for gameplay | Own `FixedPoint` collision code |
 | NavMesh, `NavMeshAgent` | `LockstepNavAgent` on the `LockstepNavGrid` (`Pragma.Lockstep.Navigation`) |

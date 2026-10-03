@@ -59,7 +59,8 @@ It is a poor fit for:
   (shaped after `Mathf`). `Sqrt`, trigonometry, `Exp`, `Log` and `Pow` are integer-only and bit-identical in Mono,
   IL2CPP and Burst. `FixedRandom` is a deterministic PCG32 generator.
 - **Input and commands.** The per-tick input is an unmanaged struct of your own; the simulation also gets the
-  previous input, so button edges are exact. Commands are discrete actions (build, buy, use) that are never dropped.
+  previous input, so button edges are exact. Commands are discrete actions (build, buy, use) that are never dropped;
+  besides their payload struct they carry data of any length (the unit ids of an order).
 - **Players as entities.** Joins and leaves travel inside the frames, so they happen on the same tick on every client.
 - **Server that never stalls.** When an input is late the server repeats the player's previous input instead of
   waiting, so one slow connection does not slow everybody down. Waiting a bounded number of ticks is opt-in.
@@ -367,6 +368,7 @@ A player is an entity created by `LockstepFrameApplySystem` on the tick the play
 | `LockstepPlayer` | `slot` in `[0, maxPlayers)`, `joinTick`, `joinData`; `GetJoinData<T>()` |
 | `LockstepPlayerInput` | The confirmed input of this tick: `Get<T>()`, `GetPrevious<T>()`, `HasChanged()` |
 | `LockstepCommand` (buffer) | Commands confirmed for this tick, cleared every tick |
+| `LockstepCommandData` (buffer) | The data of those commands, back to back; read it with `LockstepCommand.GetData<T>` |
 | `LockstepPlayerJoined` (enableable) | Enabled only during the join tick |
 | `LockstepPlayerLeft` (enableable) | Enabled only during the leave tick; the entity is destroyed at the start of the next tick |
 
@@ -413,8 +415,8 @@ var firePressed = (current.buttons & GameInput.FIRE) != 0 && (previous.buttons &
 
 ### Commands
 
-Commands are discrete actions with a payload struct of up to 122 bytes. They travel reliably and are never dropped:
-when they reach the server late, they move to the next tick.
+Commands are discrete actions with a payload struct of up to 122 bytes and, optionally, data of any length. They
+travel reliably and are never dropped: when they reach the server late, they move to the next tick.
 
 ```csharp
 public struct BuildCommand
@@ -441,11 +443,47 @@ foreach (var (player, commands) in SystemAPI.Query<RefRO<LockstepPlayer>, Dynami
 }
 ```
 
+Lists go into the command's data: an array of any unmanaged element type and any length, kept in the
+`LockstepCommandData` buffer next to the commands. An order for a whole selection is one command, however many units
+it names:
+
+```csharp
+public struct MoveCommand
+{
+    public FixedVector3 target;
+}
+
+// Client: the data goes into the LockstepCommandData buffer of the entity the command is added to.
+var commands = SystemAPI.GetSingletonBuffer<LockstepCommand>();
+var commandData = SystemAPI.GetSingletonBuffer<LockstepCommandData>();
+commands.Add(LockstepCommand.Create(new MoveCommand { target = target }, unitIds.AsArray(), commandData));
+// or, outside ECS: client.AddCommand(new MoveCommand { target = target }, unitIds.AsArray());
+
+// Simulation:
+foreach (var (player, commands, commandData) in
+         SystemAPI.Query<RefRO<LockstepPlayer>, DynamicBuffer<LockstepCommand>, DynamicBuffer<LockstepCommandData>>())
+{
+    for (var i = 0; i < commands.Length; i++)
+    {
+        if (commands[i].TryGet<MoveCommand>(out var move))
+        {
+            var unitIds = commands[i].GetData<uint>(commandData);   // a view, valid until the buffer changes
+            // validate that each unit belongs to player.ValueRO.slot, then order it
+        }
+    }
+}
+```
+
 - A command type is identified by a stable hash of its assembly-qualified name (`LockstepCommand.TypeHashOf<T>()`):
   renaming the struct, its namespace or its assembly changes the id, so all clients need the same build.
+- Data has no size limit: a large command is fragmented on the wire and still reaches every client in one tick. It
+  takes longer to arrive (Netcode sends what does not fit its reliable window on the following ticks), and on the
+  ordered channel the inputs behind it wait for it: fine for an order now and then, not for kilobytes every tick.
+- `GetData<T>` ignores trailing bytes that do not fill a whole `T`, the same way on every client; `DataLength` is the
+  size in bytes. Data starts at 8-byte boundaries, so any element type reads aligned.
 - Each player contributes at most 32 commands to one tick; the rest move to the following ticks, in order.
-- Validate commands in the simulation (enough money, valid cell...): every client runs the same validation, so a
-  cheating client only desyncs itself.
+- Validate commands in the simulation (enough money, valid cell, own units...): every client runs the same validation,
+  so a cheating client only desyncs itself.
 
 ### Join data and start data
 
@@ -1281,7 +1319,9 @@ All messages are little-endian byte strings, versioned by `LockstepProtocol.VERS
 | `End` | server → client | End of the match and its reason |
 
 A frame is a record count followed by one record per player with news: the slot, flags (`Joined`, `Left`, `Input`,
-`Commands`) and the matching payloads. A player without a record keeps the previous input.
+`Commands`) and the matching payloads. A player without a record keeps the previous input. A command is written the
+same way in `Input` and in frames: type hash, payload size, payload, data length (var uint), data. The server checks
+that form and relays the bytes without decoding them.
 
 ## Limits
 
@@ -1289,7 +1329,7 @@ A frame is a record count followed by one record per player with news: the slot,
 |---|---|
 | Players | 64 |
 | Input size | 128 bytes per tick |
-| Command payload | 122 bytes |
+| Command payload | 122 bytes, plus data of any length |
 | Commands per player per tick | 32; extra ones move to the next ticks |
 | Join data / start data | 62 / 126 bytes |
 | View key (`EntityViewKey`) | 29 bytes of UTF-8 |

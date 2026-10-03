@@ -35,6 +35,24 @@ and this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   blocks their way. `LockstepNavSystemGroup` runs `LockstepNavObstacleSystem`, `LockstepNavPathSystem` and
   `LockstepNavMoveSystem`; `LockstepNavGridAuthoring`, `LockstepNavObstacleAuthoring` and `LockstepNavAgentAuthoring`
   bake them, and selecting a grid previews the cells the obstacles block.
+- Command data: besides its payload struct (still up to 122 bytes) a command carries data of any length, an array of
+  any unmanaged element type, for lists such as the unit ids of an order. `LockstepCommand.Create(payload, data,
+  dataBuffer)` writes it into the new `LockstepCommandData` buffer, which the local input entity and every player
+  entity have next to their `LockstepCommand` buffer; `LockstepCommand.GetData<T>(dataBuffer)` reads it as a view and
+  `DataLength` gives its size. Outside ECS, `LockstepClient.AddCommand(payload, data)`. Large commands are fragmented on
+  the wire and reach every client in one tick.
+
+### Changed
+
+- Protocol version 2: a command on the wire ends with its data length and data. Clients, servers and replays of
+  version 1 are refused.
+- `LockstepClient` and `LockstepServer` queue commands in their wire form; the server checks the form and relays the
+  bytes without decoding them.
+
+### Removed
+
+- `LockstepClient.AddCommand(in LockstepCommand)`: use `AddCommand<T>(payload)`, `AddCommand<T, TData>(payload, data)`
+  or the `LockstepCommand` buffer of the local input entity.
 
 ## [1.0.0] - 2026-10-03
 

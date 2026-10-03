@@ -32,6 +32,7 @@ namespace Pragma.Lockstep
                 ComponentType.ReadWrite<LockstepPlayerJoined>(),
                 ComponentType.ReadWrite<LockstepPlayerLeft>(),
                 ComponentType.ReadWrite<LockstepCommand>(),
+                ComponentType.ReadWrite<LockstepCommandData>(),
             });
             _playersQuery = SystemAPI.QueryBuilder().WithAll<LockstepPlayer>().Build();
             _leftPlayersQuery = SystemAPI.QueryBuilder().WithAll<LockstepPlayer, LockstepPlayerLeft>().Build();
@@ -72,6 +73,7 @@ namespace Pragma.Lockstep
                 input.ShiftCurrentToPrevious();
                 entityManager.SetComponentData(player, input);
                 entityManager.GetBuffer<LockstepCommand>(player).Clear();
+                entityManager.GetBuffer<LockstepCommandData>(player).Clear();
                 entityManager.SetComponentEnabled<LockstepPlayerJoined>(player, false);
             }
 
@@ -138,17 +140,15 @@ namespace Pragma.Lockstep
                     var commandCount = reader.ReadByte();
                     for (var c = 0; c < commandCount && !reader.HasFailed; c++)
                     {
-                        var typeHash = reader.ReadInt();
-                        var size = reader.ReadByte();
-                        var payload = reader.ReadBytesPtr(size);
-                        if (payload == null || size > LockstepCommand.MAX_PAYLOAD_SIZE)
+                        if (!LockstepCommandWire.TryRead(ref reader, out var typeHash, out var payload, out var size, out var data, out var dataLength))
                         {
-                            reader.Skip(int.MaxValue);
                             break;
                         }
                         if (hasPlayer)
                         {
-                            entityManager.GetBuffer<LockstepCommand>(player).Add(LockstepCommand.FromRaw(typeHash, payload, size));
+                            var command = LockstepCommand.FromRaw(typeHash, payload, size);
+                            command.AppendData(entityManager.GetBuffer<LockstepCommandData>(player), data, dataLength);
+                            entityManager.GetBuffer<LockstepCommand>(player).Add(command);
                         }
                     }
                 }

@@ -27,8 +27,9 @@ namespace Pragma.Lockstep
             public readonly byte[] lastReceivedInput;
             public readonly byte[] ringInputs;
             public readonly int[] ringTicks;
-            public readonly List<LockstepCommand>[] ringCommands;
-            public readonly List<LockstepCommand> pendingCommands = new List<LockstepCommand>();
+            // Commands in their wire form: the server relays them without decoding.
+            public readonly List<byte[]>[] ringCommands;
+            public readonly List<byte[]> pendingCommands = new List<byte[]>();
 
             // Reserved by a player; stays reserved until the leave has been announced in a frame.
             public bool inUse;
@@ -51,10 +52,10 @@ namespace Pragma.Lockstep
                 lastReceivedInput = new byte[inputSize];
                 ringInputs = new byte[inputSize * ringSize];
                 ringTicks = new int[ringSize];
-                ringCommands = new List<LockstepCommand>[ringSize];
+                ringCommands = new List<byte[]>[ringSize];
                 for (var i = 0; i < ringSize; i++)
                 {
-                    ringCommands[i] = new List<LockstepCommand>();
+                    ringCommands[i] = new List<byte[]>();
                 }
                 Reset();
             }
@@ -106,7 +107,7 @@ namespace Pragma.Lockstep
         private readonly int _ringMask;
         private readonly Dictionary<int, Connection> _connections = new Dictionary<int, Connection>();
         private readonly List<Connection> _connectionOrder = new List<Connection>();
-        private readonly List<LockstepCommand> _receivedCommands = new List<LockstepCommand>();
+        private readonly List<byte[]> _receivedCommands = new List<byte[]>();
         private readonly Dictionary<int, ChecksumRound> _pendingChecksums = new Dictionary<int, ChecksumRound>();
         private readonly Dictionary<int, ulong> _resolvedChecksums = new Dictionary<int, ulong>();
         private readonly List<int> _checksumTicksToResolve = new List<int>();
@@ -477,15 +478,18 @@ namespace Pragma.Lockstep
                     var commandCount = reader.ReadByte();
                     for (var c = 0; c < commandCount && !reader.HasFailed; c++)
                     {
-                        var typeHash = reader.ReadInt();
-                        var size = reader.ReadByte();
-                        var payload = reader.ReadBytesPtr(size);
-                        if (payload == null || size > LockstepCommand.MAX_PAYLOAD_SIZE)
+                        var start = reader.CurrentPtr;
+                        var startPosition = reader.Position;
+                        if (!LockstepCommandWire.TryRead(ref reader, out _, out _, out _, out _, out _))
                         {
-                            reader.Skip(int.MaxValue);
                             break;
                         }
-                        _receivedCommands.Add(LockstepCommand.FromRaw(typeHash, payload, size));
+                        var command = new byte[reader.Position - startPosition];
+                        fixed (byte* destination = command)
+                        {
+                            UnsafeUtility.MemCpy(destination, start, command.Length);
+                        }
+                        _receivedCommands.Add(command);
                     }
                 }
 
@@ -644,7 +648,6 @@ namespace Pragma.Lockstep
             var recordCount = 0;
             var inputSize = _settings.InputSize;
             var index = tick & _ringMask;
-            var payload = stackalloc byte[LockstepCommand.MAX_PAYLOAD_SIZE];
 
             foreach (var slot in _slots)
             {
@@ -727,10 +730,10 @@ namespace Pragma.Lockstep
                     for (var c = 0; c < commandCount; c++)
                     {
                         var command = slot.pendingCommands[c];
-                        writer.WriteInt(command.typeHash);
-                        writer.WriteByte(command.size);
-                        command.CopyPayloadTo(payload);
-                        writer.WriteBytes(payload, command.size);
+                        fixed (byte* bytes = command)
+                        {
+                            writer.WriteBytes(bytes, command.Length);
+                        }
                     }
                     slot.pendingCommands.RemoveRange(0, commandCount);
                 }

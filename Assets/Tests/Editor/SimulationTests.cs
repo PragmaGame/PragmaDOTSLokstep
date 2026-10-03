@@ -110,6 +110,57 @@ namespace Pragma.Lockstep.Tests
         }
 
         [Test]
+        public void CommandData_OfAnyLength_IsVisibleForExactlyOneTick()
+        {
+            var many = new int[20000];
+            for (var i = 0; i < many.Length; i++)
+            {
+                many[i] = i;
+            }
+            TestUtility.Step(_simulation, new FrameBuilder().Join(0)
+                .Command(0, new TestCommand { value = 1 }, 10, 20, 30)
+                .Command(0, new TestCommand { value = 2 })
+                .Command(0, new TestCommand { value = 3 }, many)
+                .Build());
+
+            var player = TestUtility.PlayerEntity(_simulation, 0);
+            var commands = EntityManager.GetBuffer<LockstepCommand>(player);
+            var data = EntityManager.GetBuffer<LockstepCommandData>(player);
+            CollectionAssert.AreEqual(new[] { 10, 20, 30 }, commands[0].GetData<int>(data).ToArray());
+            Assert.AreEqual(0, commands[1].DataLength);
+            Assert.AreEqual(0, commands[1].GetData<int>(data).Length);
+            CollectionAssert.AreEqual(many, commands[2].GetData<int>(data).ToArray());
+            var state = TestUtility.PlayerState(_simulation, 0);
+            Assert.AreEqual(3 + many.Length, state.commandDataCount);
+            Assert.AreEqual(60L + (long)(many.Length - 1) * many.Length / 2, state.commandDataSum);
+
+            TestUtility.Step(_simulation);
+            Assert.AreEqual(0, EntityManager.GetBuffer<LockstepCommandData>(player).Length, "data is cleared with the commands");
+            Assert.AreEqual(3 + many.Length, TestUtility.PlayerState(_simulation, 0).commandDataCount);
+        }
+
+        [Test]
+        public void CommandData_IsAlignedForAnyElementType()
+        {
+            TestUtility.Step(_simulation, new FrameBuilder().Join(0)
+                .Command(0, new TestCommand { value = 1 }, (byte)7, (byte)8, (byte)9)
+                .Command(0, new TestCommand { value = 2 }, 5L, -6L)
+                .Build());
+
+            var player = TestUtility.PlayerEntity(_simulation, 0);
+            var commands = EntityManager.GetBuffer<LockstepCommand>(player);
+            var data = EntityManager.GetBuffer<LockstepCommandData>(player);
+            CollectionAssert.AreEqual(new byte[] { 7, 8, 9 }, commands[0].GetData<byte>(data).ToArray());
+            Assert.AreEqual(0, commands[0].GetData<int>(data).Length, "bytes that do not fill an element are ignored");
+            Assert.AreEqual(0, commands[1].DataOffset % LockstepCommand.DATA_ALIGNMENT);
+            CollectionAssert.AreEqual(new[] { 5L, -6L }, commands[1].GetData<long>(data).ToArray());
+            for (var i = commands[0].DataLength; i < commands[1].DataOffset; i++)
+            {
+                Assert.AreEqual(0, data[i].value, "padding is zero, so it hashes the same everywhere");
+            }
+        }
+
+        [Test]
         public void SameFrames_GiveSameStateEveryTick()
         {
             using (var other = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(typeof(TestGameplaySystem))))

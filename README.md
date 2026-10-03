@@ -13,7 +13,7 @@ server never simulates, and the bandwidth depends on the number of players, not 
 
 - An isolated, deterministic simulation world; gameplay systems opt in through `LockstepSimulationSystemGroup`.
 - Fixed-point math (`FixedPoint`, `FixedVector2`, `FixedVector3`, `FixedQuaternion`, `FixedMath`, `FixedRandom`), bit-identical in Mono, IL2CPP and Burst.
-- Per-tick input structs, never-dropped commands, players as entities.
+- Per-tick input structs, never-dropped commands with data of any length, players as entities.
 - A server that orders input and never stalls, adaptive input timing, a jitter-aware playout buffer.
 - Desync detection by majority vote with a per-component breakdown, replays, late join, offline mode.
 - Netcode for Entities integration (host, dedicated server, thin clients) and a transport-agnostic core.

@@ -31,7 +31,8 @@ namespace Pragma.Lockstep
         private readonly ILockstepTransport _transport;
         private readonly LockstepPacketFramer _framer;
         private readonly LockstepFrameHistory _frames;
-        private readonly List<LockstepCommand> _pendingCommands = new List<LockstepCommand>();
+        // Commands in their wire form, queued until the next input message.
+        private readonly List<byte[]> _pendingCommands = new List<byte[]>();
         private readonly List<KeyValuePair<int, ulong>> _localChecksums = new List<KeyValuePair<int, ulong>>();
         private readonly byte[] _input = new byte[LockstepProtocol.MAX_INPUT_SIZE];
         private readonly byte[] _lastSentInput = new byte[LockstepProtocol.MAX_INPUT_SIZE];
@@ -157,9 +158,24 @@ namespace Pragma.Lockstep
         }
 
         /// <summary>Queues a command; it is attached to the next tick an input is sent for.</summary>
-        public void AddCommand(in LockstepCommand command) => _pendingCommands.Add(command);
+        public void AddCommand<T>(in T payload) where T : unmanaged => AddCommand(LockstepCommand.Create(payload), null, 0);
 
-        public void AddCommand<T>(in T payload) where T : unmanaged => _pendingCommands.Add(LockstepCommand.Create(payload));
+        /// <summary>Queues a command with data of any length (see <see cref="LockstepCommandData"/>).</summary>
+        public void AddCommand<T, TData>(in T payload, NativeArray<TData> data)
+            where T : unmanaged
+            where TData : unmanaged
+        {
+            var hasData = data.IsCreated && data.Length > 0;
+            AddCommand(LockstepCommand.Create(payload),
+                hasData ? (byte*)data.GetUnsafeReadOnlyPtr() : null,
+                hasData ? data.Length * UnsafeUtility.SizeOf<TData>() : 0);
+        }
+
+        /// <summary>Queues a command whose data is <paramref name="dataLength"/> bytes at <paramref name="data"/>.</summary>
+        internal void AddCommand(in LockstepCommand command, byte* data, int dataLength)
+        {
+            _pendingCommands.Add(LockstepCommandWire.Encode(command, data, dataLength));
+        }
 
         public void OnPacket(byte* data, int length, double now)
         {
@@ -468,7 +484,6 @@ namespace Pragma.Lockstep
                 Debug.LogError($"[Lockstep] The input set on the client is {_inputSize} bytes but the session input size is {inputSize} bytes.");
             }
 
-            var payload = stackalloc byte[LockstepCommand.MAX_PAYLOAD_SIZE];
             fixed (byte* input = _input)
             fixed (byte* lastSent = _lastSentInput)
             {
@@ -503,10 +518,10 @@ namespace Pragma.Lockstep
                             for (var c = 0; c < commandCount; c++)
                             {
                                 var command = _pendingCommands[c];
-                                writer.WriteInt(command.typeHash);
-                                writer.WriteByte(command.size);
-                                command.CopyPayloadTo(payload);
-                                writer.WriteBytes(payload, command.size);
+                                fixed (byte* bytes = command)
+                                {
+                                    writer.WriteBytes(bytes, command.Length);
+                                }
                             }
                             _pendingCommands.RemoveRange(0, commandCount);
                         }
