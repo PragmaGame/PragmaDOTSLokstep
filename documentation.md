@@ -254,6 +254,12 @@ These came up while building on Entities; neither reference package deals with t
    entities with views and changes by comparing chunk change versions with the last version they saw. A test runs two
    clients, one of them with views, and checks that their state hashes stay equal.
 
+10. **Scene content.** A map's buildings and markers live in a subscene of the presentation world, which the
+    simulation must never read. Like the prefab registry, they are copied into the simulation world before tick 0
+    (`LockstepSceneEntity`), the counterpart of Netcode's pre-spawned ghosts. The copy is sorted by an order baked
+    from each object's `GlobalObjectId`, because the query order of the presentation world follows the order its
+    subscene sections loaded in, which may differ between clients.
+
 ## Limitations and future work
 
 - **Prediction and rollback**: a predicted copy of the simulation world, restored from the confirmed one and

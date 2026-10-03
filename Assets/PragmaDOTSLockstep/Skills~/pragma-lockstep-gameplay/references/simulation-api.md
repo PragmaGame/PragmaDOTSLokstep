@@ -118,6 +118,14 @@ moves to later ticks), `MAX_JOIN_DATA_SIZE` 62, `MAX_START_DATA_SIZE` 126.
 | `LockstepPrefabUtility.HasRegistry(EntityManager)`, `CopyRegistry(source, destination)` | Plumbing used by the built-in systems |
 
 Spawning: `state.EntityManager.Instantiate(SystemAPI.GetSingletonBuffer<LockstepPrefabElement>(true)[index].prefab)`.
+Scene entities, the objects a map starts with:
+
+| Type | Notes |
+|---|---|
+| `Pragma.Lockstep.Authoring.LockstepSceneEntityAuthoring` | Put it on a scene object of the subscene that holds the registry: the object is copied into every simulation world before tick 0 |
+| `LockstepSceneEntity { ulong order }` | Copy order, baked from the object's identity in its scene; the copy keeps the component |
+| `LockstepPrefabUtility.CopySceneEntities(source, destination)` | The copy the built-in systems make after `CopyRegistry`; references to anything outside the scene entities (registry prefabs included) become `Entity.Null`, so name prefabs by index or by a key |
+
 The registry entity always exists in simulation worlds made by the built-in systems, so check the buffer length before
 indexing, and use `waitForPrefabRegistry` when starting the session so the simulation is created after the subscene
 loaded.
@@ -147,6 +155,7 @@ Namespace `Pragma.Lockstep.Authoring`:
 - `LockstepTransformAuthoring` - bakes the transform into `LockstepTransform` (float to `FixedPoint` once, at bake time); *Interpolate*
   adds `LockstepTransformPrevious`.
 - `LockstepPrefabRegistryAuthoring` - the prefab list.
+- `LockstepSceneEntityAuthoring` - copies a scene object into every simulation world before tick 0.
 - `LockstepEntityIdAuthoring` - adds `LockstepEntityId`.
 - `EntityViewKeyAuthoring` - adds `EntityViewKey`, so instances get the GameObject view bound to the key.
 - `EntityViewConfigAuthoring` - bakes an `EntityViewConfig` catalog into the presentation world (not for servers).

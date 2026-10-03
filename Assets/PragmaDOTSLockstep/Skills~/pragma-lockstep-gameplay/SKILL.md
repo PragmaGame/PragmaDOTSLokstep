@@ -66,6 +66,9 @@ var buffer = SystemAPI.GetSingleton<LockstepEndSimulationEntityCommandBufferSyst
 var prefabs = SystemAPI.GetSingletonBuffer<LockstepPrefabElement>(true);
 var prefab = prefabIndex < prefabs.Length ? prefabs[prefabIndex].prefab : Entity.Null;
 
+// Map objects (buildings, markers) placed in that subscene with LockstepSceneEntityAuthoring are already in the
+// simulation world at tick 0: query them like any entity (they keep LockstepSceneEntity).
+
 // Cross-client identities.
 var ids = SystemAPI.GetSingleton<LockstepEntityIdMap>();
 ids.TryGetEntity(targetId, out var target);

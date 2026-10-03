@@ -108,7 +108,7 @@ Reference the assemblies you use from your assembly definitions:
 | `Pragma.Lockstep` | Protocol, simulation world, components, checksums, replays, offline mode, presentation helpers | simulation and presentation code |
 | `Pragma.Lockstep.Views` | GameObject views: `EntityView`, view parts, `EntityViewKey`, the view manager, catalogs, the pool abstraction | presentation code, and simulation code that sets an `EntityViewKey` |
 | `Pragma.Lockstep.Netcode` | Netcode for Entities RPC and the server and client systems | bootstrap code |
-| `Pragma.Lockstep.Authoring` | Bakers for transforms, the prefab registry, entity ids, view catalogs and view keys | authoring code, if any |
+| `Pragma.Lockstep.Authoring` | Bakers for transforms, the prefab registry, scene entities, entity ids, view catalogs and view keys | authoring code, if any |
 
 ## How it works
 
@@ -465,6 +465,14 @@ foreach (var (player, commands) in SystemAPI.Query<RefRO<LockstepPlayer>, Dynami
   The registry entity always exists in the simulation world, but it is empty when the presentation world had no
   baked registry when the simulation was created: start the session with `waitForPrefabRegistry`, and check the
   buffer length before indexing.
+- Scene entities: what a map starts with (buildings, resource nodes, spawn markers) is placed in that subscene like
+  any scene object and gets a `LockstepSceneEntityAuthoring`. The built-in systems copy every `LockstepSceneEntity` of
+  the presentation world (with its linked entities) into the simulation before tick 0, sorted by an order baked from
+  the object's identity in its scene, so every client starts from the same entities whatever order its subscenes
+  loaded in. References between scene entities are kept; references to anything else, registry prefabs included,
+  become `Entity.Null`, so a scene entity names a prefab by registry index or by a key of your own. Only GameObject
+  views show scene entities: `LockstepViewSystem` mirrors registry instances only, and the presentation world keeps
+  its own inert copy of the baked entity.
 
 ### Referring to entities
 
@@ -1024,7 +1032,8 @@ Used when you create a `LockstepClient`, `LockstepSimulation` or `LockstepReplay
 | `CanCreate` | none | Gate checked before the world is created; frames keep buffering meanwhile |
 
 `LockstepClientWorldUtility.CreateSimulationOptions(presentationWorld, waitForPrefabRegistry)` builds the options the
-built-in systems use: they copy the prefab registry of the presentation world into the simulation world.
+built-in systems use: they copy the prefab registry and the scene entities of the presentation world into the
+simulation world.
 
 ## Desync detection and debugging
 
@@ -1222,7 +1231,7 @@ A frame is a record count followed by one record per player with news: the slot,
 | `Runtime/Views` | `Pragma.Lockstep.Views`: GameObject views (`EntityView`, view parts, `EntityViewManagerSystem`, update systems, catalogs, the pool) |
 | `Runtime/Netcode` | `Pragma.Lockstep.Netcode`: the RPC, server and client systems, `LockstepNetcode` |
 | `Runtime/Netcode/Components` | `LockstepServerConfig`, `LockstepClientConfig`, `LockstepServerStatus`, start and end requests |
-| `Runtime/Authoring` | `Pragma.Lockstep.Authoring`: bakers (transforms, prefab registry, entity ids, view catalogs and keys) |
+| `Runtime/Authoring` | `Pragma.Lockstep.Authoring`: bakers (transforms, prefab registry, scene entities, entity ids, view catalogs and keys) |
 | `Editor` | `Pragma.Lockstep.Editor`: fixed-point drawers, the debug window |
 | `Skills~` | Claude Code skills (Unity skips folders whose name ends with `~`) |
 
@@ -1265,6 +1274,7 @@ Copy-Item -Recurse -Force (Resolve-Path "Library/PackageCache/com.pragma.dotsloc
 | Nothing moves although the session runs | The gameplay systems are not in `LockstepSimulationSystemGroup`, or no system writes `LockstepLocalInput` |
 | Entities Graphics copies do not appear | No `LockstepPrefabRegistryAuthoring` in the presentation world, the entity was not instantiated from the registry, or the simulation started before the subscene loaded (`waitForPrefabRegistry`) |
 | GameObject views do not appear | The entity has no `EntityViewKey`, no catalog binds its key (keys are case-sensitive), or the catalog was baked into a subscene that did not load into this world: register it with `EntityViewConfigProvider` |
+| A map object is missing from the simulation | It has no `LockstepSceneEntityAuthoring`, it sits in another subscene than the registry, or the session started without `waitForPrefabRegistry` |
 | A GameObject view misses a component | No `EntityViewUpdateSystem<T>` subclass for that type, or the part sits under a nested `EntityView` |
 | A GameObject view does not move | No `TransformComponentView` on it, or the entity has no `LockstepTransform`; without `LockstepTransformPrevious` it moves in steps |
 | Connections drop when the window loses focus | `Application.runInBackground` is off |

@@ -23,6 +23,11 @@ and this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `LockstepTransformExtensions.TryGetInterpolated`: reads and interpolates the transform of a simulation entity with the
   rule both view systems use.
 - The sample shows its avatars and projectiles with GameObject views.
+- Scene entities: `LockstepSceneEntityAuthoring` marks the objects of a subscene that every simulation world starts
+  with (buildings, resource nodes, spawn markers). `LockstepClientWorldUtility.CreateSimulationOptions` copies them,
+  with their linked entities, after the prefab registry and before tick 0, in an order baked from the objects'
+  identities (`LockstepSceneEntity.order`), so the result does not depend on the order subscenes loaded in.
+  `LockstepPrefabUtility.CopySceneEntities` does the copy for custom flows.
 
 ## [1.0.0] - 2026-10-03
 

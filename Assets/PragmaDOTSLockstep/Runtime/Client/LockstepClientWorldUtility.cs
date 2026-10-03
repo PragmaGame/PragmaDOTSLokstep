@@ -29,13 +29,20 @@ namespace Pragma.Lockstep
             commands.Clear();
         }
 
-        /// <summary>Simulation options that copy this world's prefab registry into every simulation world.</summary>
+        /// <summary>
+        /// Simulation options that copy this world's prefab registry and scene entities (<see cref="LockstepSceneEntity"/>)
+        /// into every simulation world.
+        /// </summary>
         public static LockstepSimulationOptions CreateSimulationOptions(World presentationWorld, bool waitForPrefabRegistry)
         {
             var options = new LockstepSimulationOptions
             {
                 WorldName = $"Lockstep Simulation ({presentationWorld.Name})",
-                Initialize = simulationWorld => LockstepPrefabUtility.CopyRegistry(presentationWorld.EntityManager, simulationWorld.EntityManager),
+                Initialize = simulationWorld =>
+                {
+                    LockstepPrefabUtility.CopyRegistry(presentationWorld.EntityManager, simulationWorld.EntityManager);
+                    LockstepPrefabUtility.CopySceneEntities(presentationWorld.EntityManager, simulationWorld.EntityManager);
+                },
             };
             if (waitForPrefabRegistry)
             {

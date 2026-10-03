@@ -1,9 +1,13 @@
+using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Entities;
 
 namespace Pragma.Lockstep
 {
-    /// <summary>Copies the baked prefab registry of a presentation world into a simulation world.</summary>
+    /// <summary>
+    /// Copies the baked content of a presentation world into a simulation world: the prefab registry and the scene
+    /// entities.
+    /// </summary>
     public static class LockstepPrefabUtility
     {
         public static bool HasRegistry(EntityManager entityManager)
@@ -89,6 +93,62 @@ namespace Pragma.Lockstep
             return sourcePrefabs.Length > 0;
         }
 
+        /// <summary>
+        /// Copies every <see cref="LockstepSceneEntity"/> of <paramref name="source"/> (with its linked entities) into
+        /// <paramref name="destination"/>, ordered by <see cref="LockstepSceneEntity.order"/>. Prefabs are not scene
+        /// entities and are skipped.
+        /// </summary>
+        /// <remarks>
+        /// References between the copied entities are remapped to the copies; references to anything else, registry
+        /// prefabs included, become <see cref="Entity.Null"/>, so scene entities name prefabs by registry index or by a key.
+        /// </remarks>
+        /// <returns>The number of scene entities copied.</returns>
+        public static int CopySceneEntities(EntityManager source, EntityManager destination)
+        {
+            var description = new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<LockstepSceneEntity>() },
+                Options = EntityQueryOptions.IncludeDisabledEntities,
+            };
+            NativeArray<Entity> entities;
+            NativeArray<LockstepSceneEntity> markers;
+            using (var query = source.CreateEntityQuery(description))
+            {
+                entities = query.ToEntityArray(Allocator.Temp);
+                markers = query.ToComponentDataArray<LockstepSceneEntity>(Allocator.Temp);
+            }
+            if (entities.Length == 0)
+            {
+                return 0;
+            }
+
+            // The query order follows the order the subscenes loaded in, which may differ between clients.
+            var order = new NativeArray<int>(entities.Length, Allocator.Temp);
+            for (var i = 0; i < order.Length; i++)
+            {
+                order[i] = i;
+            }
+            order.Sort(new SceneEntityComparer { markers = markers });
+
+            var toCopy = new NativeList<Entity>(Allocator.Temp);
+            var copyIndex = new NativeHashMap<Entity, int>(entities.Length, Allocator.Temp);
+            for (var i = 0; i < order.Length; i++)
+            {
+                var entity = entities[order[i]];
+                AddUnique(entity, toCopy, copyIndex);
+                if (source.HasBuffer<LinkedEntityGroup>(entity))
+                {
+                    var group = source.GetBuffer<LinkedEntityGroup>(entity, true);
+                    for (var g = 0; g < group.Length; g++)
+                    {
+                        AddUnique(group[g].Value, toCopy, copyIndex);
+                    }
+                }
+            }
+            destination.CopyEntitiesFrom(source, toCopy.AsArray());
+            return entities.Length;
+        }
+
         private static void AddUnique(Entity entity, NativeList<Entity> list, NativeHashMap<Entity, int> index)
         {
             if (index.ContainsKey(entity))
@@ -97,6 +157,18 @@ namespace Pragma.Lockstep
             }
             index.Add(entity, list.Length);
             list.Add(entity);
+        }
+
+        // By the baked order; equal orders keep the query order rather than whatever an unstable sort leaves.
+        private struct SceneEntityComparer : IComparer<int>
+        {
+            public NativeArray<LockstepSceneEntity> markers;
+
+            public int Compare(int x, int y)
+            {
+                var result = markers[x].order.CompareTo(markers[y].order);
+                return result != 0 ? result : x.CompareTo(y);
+            }
         }
 
         private static EntityQuery CreateRegistryQuery(EntityManager entityManager)
