@@ -13,6 +13,7 @@ camelCase; settings and options are PascalCase properties.
 - Entity ids
 - Prefab registry
 - Navigation
+- Stats
 - Bytes helpers
 - Presentation-side access
 - Authoring components
@@ -156,6 +157,22 @@ Namespace and assembly `Pragma.Lockstep.Navigation`.
 
 Read the cells with `SystemAPI.GetSingletonBuffer<LockstepNavCell>(true).AsNativeArray()` and the grid with
 `SystemAPI.GetSingleton<LockstepNavGrid>()`.
+
+## Stats
+
+Namespace and assembly `Pragma.Lockstep.Stats`.
+
+| Type | Members |
+|---|---|
+| `LockstepStat` | Buffer: `int type` (the game's stat id), `FixedPoint baseValue`, `FixedPoint value` (base with the modifiers applied); `Create(type, baseValue)`. Each stat once per entity |
+| `LockstepStatModifier` | Buffer: `int stat`, `LockstepStatModifierType type`, `FixedPoint value`, `LockstepStatSource source`, `int endTick` (`PERMANENT` = 0: until removed); `Flat`, `Additive`, `Multiplicative` factories `(stat, value, source = default, endTick = PERMANENT)`, `IsExpired(tick)` |
+| `LockstepStatModifierType` | `Flat` (adds), `Additive` (shares summed: 0.25 adds 25 %), `Multiplicative` (times 1 + value, stacking) |
+| `LockstepStatSource` | `uint kind`, `uint id`, equality. What applied a modifier; one source's modifiers are removed together |
+| `LockstepStatSystem` | In `LockstepSimulationSystemGroup`: removes expired modifiers, recalculates entities with both buffers whose chunk changed, writes `LockstepStat` only then |
+| `LockstepStats` | `TryGetValue(stats, type, out value)`, `TryGetBase`, `TrySetBase(stats, type, baseValue)`, `RemoveModifiers(modifiers, source)` (returns the count, keeps the order), `Calculate(type, baseValue, NativeArray<LockstepStatModifier>)` |
+
+`value = (base + sum of Flat) * (1 + sum of Additive) * product of (1 + Multiplicative)`. A modifier ending on tick
+T + D was applied on ticks T to T + D - 1 when added on tick T before `LockstepStatSystem`.
 
 ## Bytes helpers
 

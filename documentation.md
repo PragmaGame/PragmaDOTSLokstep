@@ -283,6 +283,17 @@ These came up while building on Entities; neither reference package deals with t
     8-byte boundaries in the buffer, with zeroed padding, so any element type reads aligned and the checksum sees the
     same bytes everywhere.
 
+13. **Stats as buffers with change versions.** Upgrades, research, abilities and auras all change numbers of units,
+    and patching component fields by hand loses track of who changed what and leaves no way to end an effect. Each
+    entity keeps base values and modifiers in two buffers; the game names its stats with its own ids, so the package
+    knows no stat list and an entity carries only the stats it has. Modifiers are removed by their source (an effect
+    that ends or is applied again takes all of its modifiers along) or by an end tick, which keeps timed effects in the
+    simulation state instead of in timers. The stat system recalculates only the chunks whose buffers changed, by
+    change versions, and writes stats only then, so systems that apply a stat to another component wake only when it
+    changed. Versions are allowed to decide this because a recalculation is idempotent: a chunk recalculated without
+    need gets the same bytes, so the state never depends on how versions advance on a machine (a late joiner replaying
+    many ticks per frame included).
+
 ## Limitations and future work
 
 - **Prediction and rollback**: a predicted copy of the simulation world, restored from the confirmed one and

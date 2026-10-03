@@ -1,0 +1,21 @@
+{
+    "name": "Pragma.Lockstep.Stats",
+    "rootNamespace": "Pragma.Lockstep.Stats",
+    "references": [
+        "Pragma.Lockstep",
+        "Pragma.Lockstep.Mathematics",
+        "Unity.Entities",
+        "Unity.Collections",
+        "Unity.Burst",
+        "Unity.Mathematics"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

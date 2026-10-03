@@ -6,6 +6,7 @@
         "Pragma.Lockstep.Mathematics",
         "Pragma.Lockstep.Navigation",
         "Pragma.Lockstep.Netcode",
+        "Pragma.Lockstep.Stats",
         "Pragma.Lockstep.Views",
         "Pragma.Lockstep.Tests.Runtime",
         "Unity.Entities",

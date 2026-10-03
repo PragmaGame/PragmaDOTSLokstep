@@ -20,6 +20,7 @@ simulated entities.
 - [Determinism rules](#determinism-rules)
 - [Fixed-point math](#fixed-point-math)
 - [Navigation](#navigation)
+- [Stats](#stats)
 - [Sessions](#sessions)
 - [Presentation](#presentation)
 - [Timing and latency](#timing-and-latency)
@@ -70,6 +71,8 @@ It is a poor fit for:
   tells everybody which client diverged. A per-component breakdown shows what diverged.
 - **Navigation.** A walkability grid, obstacles that block it while their entity exists, A* with string pulling in
   integer math and agents that walk the paths in `FixedPoint`, planning again when obstacles change.
+- **Stats.** Base values and flat, additive and multiplicative modifiers in `FixedPoint`, timed or lasting until
+  their source removes them, recalculated only where something changed.
 - **Late join.** A player joining a running match re-simulates it from tick 0 while new frames keep streaming in.
 - **Replays.** Export from a client or the server and play back with checksum verification.
 - **Offline mode.** The same protocol over an in-process loopback: single player exercises the complete code path.
@@ -111,6 +114,8 @@ Reference the assemblies you use from your assembly definitions:
 |---|---|---|
 | `Pragma.Lockstep.Mathematics` | `FixedPoint`, vectors, quaternion, `FixedMath`, `FixedRandom`; no Entities dependency | simulation and presentation code |
 | `Pragma.Lockstep` | Protocol, simulation world, components, checksums, replays, offline mode, presentation helpers | simulation and presentation code |
+| `Pragma.Lockstep.Navigation` | The walkability grid, obstacles, agents, `LockstepPathfinder` and the navigation systems | simulation code |
+| `Pragma.Lockstep.Stats` | Stats and their modifiers, `LockstepStatSystem` and the `LockstepStats` helpers | simulation code, and presentation code that shows stats |
 | `Pragma.Lockstep.Views` | GameObject views: `EntityView`, view parts, `EntityViewKey`, the view manager, catalogs, the pool abstraction | presentation code, and simulation code that sets an `EntityViewKey` |
 | `Pragma.Lockstep.Netcode` | Netcode for Entities RPC and the server and client systems | bootstrap code |
 | `Pragma.Lockstep.Authoring` | Bakers for transforms, the prefab registry, scene entities, entity ids, view catalogs and view keys | authoring code, if any |
@@ -781,6 +786,98 @@ destination; an unreachable destination makes it visit the whole reachable area.
 with one scratch buffer per chunk, and walking agents only re-check their remaining segments when the grid changes.
 Pick the cell size from the narrowest gap units must pass: about the agent radius is a good start.
 
+## Stats
+
+`Pragma.Lockstep.Stats` keeps the numbers that upgrades, research, abilities and auras change: health, speed, damage,
+range. An entity has base values and a list of modifiers, and a system recalculates the values in `FixedPoint` when
+either of them changes.
+
+| Type | What it is |
+|---|---|
+| `LockstepStat` | Buffer element: one stat of the entity, its `type` (an id the game defines, usually an enum cast to `int`), `baseValue` and `value`, the base with the modifiers applied |
+| `LockstepStatModifier` | Buffer element: the `stat` it changes, its `type` (`Flat`, `Additive`, `Multiplicative`) and `value`, its `source` and `endTick` (`PERMANENT` by default) |
+| `LockstepStatSource` | What applied a modifier: two numbers the game picks (`kind`, `id`). The modifiers of one source are removed together |
+| `LockstepStatSystem` | In `LockstepSimulationSystemGroup`: removes the modifiers whose end tick has come and recalculates the stats of the entities whose base values or modifiers changed |
+| `LockstepStats` | `TryGetValue`, `TryGetBase`, `TrySetBase`, `RemoveModifiers`, `Calculate` (the formula, for tooltips and previews) |
+
+### Setting it up
+
+Name the stats with an enum of your own and bake both buffers onto the entities that have stats; the modifier buffer
+may stay empty, but without it the entity is not updated:
+
+```csharp
+public enum StatType { MaxHealth = 1, Speed = 2 }
+
+// In a baker:
+var stats = AddBuffer<LockstepStat>(entity);
+stats.Add(LockstepStat.Create((int)StatType.MaxHealth, (FixedPoint)authoring.maxHealth));
+stats.Add(LockstepStat.Create((int)StatType.Speed, (FixedPoint)authoring.speed));
+AddBuffer<LockstepStatModifier>(entity);
+```
+
+Change modifiers in systems that update before `LockstepStatSystem` and read values in systems after it, and both
+happen on the same tick:
+
+```csharp
+[UpdateInGroup(typeof(LockstepSimulationSystemGroup))]
+[UpdateBefore(typeof(LockstepStatSystem))]
+public partial struct SprintSystem : ISystem
+{
+    public void OnUpdate(ref SystemState state)
+    {
+        var time = SystemAPI.GetSingleton<LockstepTime>();
+        var source = new LockstepStatSource((uint)EffectKind.Sprint, 0);
+        foreach (var modifiers in SystemAPI.Query<DynamicBuffer<LockstepStatModifier>>().WithAll<SprintRequest>())
+        {
+            // Applied again, the effect is refreshed instead of stacking.
+            LockstepStats.RemoveModifiers(modifiers, source);
+            modifiers.Add(LockstepStatModifier.Additive((int)StatType.Speed, FixedPoint.Half, source, time.tick + 5 * time.tickRate));
+        }
+    }
+}
+
+[UpdateInGroup(typeof(LockstepSimulationSystemGroup))]
+[UpdateAfter(typeof(LockstepStatSystem))]
+[UpdateBefore(typeof(LockstepNavSystemGroup))]
+public partial struct SpeedStatSystem : ISystem
+{
+    public void OnUpdate(ref SystemState state)
+    {
+        new ApplyJob().ScheduleParallel();
+    }
+
+    [WithChangeFilter(typeof(LockstepStat))]
+    private partial struct ApplyJob : IJobEntity
+    {
+        // Read with `in`: writing the stats would mark them changed and make LockstepStatSystem recalculate them every tick.
+        private void Execute(ref LockstepNavAgent agent, in DynamicBuffer<LockstepStat> stats)
+        {
+            if (LockstepStats.TryGetValue(stats, (int)StatType.Speed, out var speed))
+            {
+                agent.speed = speed;
+            }
+        }
+    }
+}
+```
+
+### Behaviour
+
+- **Formula.** `value = (base + sum of Flat) * (1 + sum of Additive) * product of (1 + Multiplicative)`. Additive
+  values are shares that add up (0.25 and 0.15 make +40 %); multiplicative ones stack on each other (0.5 and 0.5 make
+  2.25 times). A modifier of a stat the entity does not have changes nothing.
+- **Timed modifiers.** `endTick` is the tick the modifier is removed on: added on tick T for D ticks, it ends on T + D
+  and applies from T to T + D - 1. Durations are ticks: `seconds * time.tickRate`.
+- **Sources.** `RemoveModifiers` removes every modifier of a source and keeps the order of the others. Removing a source
+  before adding its modifiers again refreshes an effect instead of stacking it.
+- **Base values.** `TrySetBase` changes a base value (a level up); the value follows in the next stat update.
+- **When values change.** `LockstepStatSystem` decides per chunk, by the change versions of the two buffers, whether to
+  recalculate, and writes the stats only then, so systems that follow a stat can use a change filter on
+  `LockstepStat`. A recalculation gives the same values however often it runs, so the state never depends on the
+  versions themselves.
+- **Determinism.** Integer and `FixedPoint` math only; chunks are processed in parallel and each writes only its own
+  entities.
+
 ## Sessions
 
 ### Offline
@@ -1346,6 +1443,7 @@ that form and relays the bytes without decoding them.
 | `Runtime/Transforms` | `LockstepTransform`, `LockstepTransformPrevious`, transform history |
 | `Runtime/Client` | Local input, `LockstepWorlds`, offline mode, prefab registry copy, `LockstepViewSystem` |
 | `Runtime/Navigation` | `Pragma.Lockstep.Navigation`: the grid, obstacles, agents, `LockstepPathfinder`, the navigation systems |
+| `Runtime/Stats` | `Pragma.Lockstep.Stats`: stats and modifiers, `LockstepStatSystem`, `LockstepStats` |
 | `Runtime/Views` | `Pragma.Lockstep.Views`: GameObject views (`EntityView`, view parts, `EntityViewManagerSystem`, update systems, catalogs, the pool) |
 | `Runtime/Netcode` | `Pragma.Lockstep.Netcode`: the RPC, server and client systems, `LockstepNetcode` |
 | `Runtime/Netcode/Components` | `LockstepServerConfig`, `LockstepClientConfig`, `LockstepServerStatus`, start and end requests |
@@ -1360,7 +1458,7 @@ how to work with it:
 
 | Skill | Use it for |
 |---|---|
-| `pragma-lockstep-gameplay` | Writing simulation code: systems, input, commands, players, `FixedPoint` math, spawning, navigation; presentation and GameObject views |
+| `pragma-lockstep-gameplay` | Writing simulation code: systems, input, commands, players, `FixedPoint` math, spawning, navigation, stats; presentation and GameObject views |
 | `pragma-lockstep-sessions` | Offline, host, join, dedicated servers, settings, match flow, custom transports, replays |
 | `pragma-lockstep-desync` | Finding and preventing desyncs, determinism tests |
 
@@ -1398,6 +1496,8 @@ Copy-Item -Recurse -Force (Resolve-Path "Library/PackageCache/com.pragma.dotsloc
 | Agents do not move | The agent has no `LockstepTransform` or `LockstepNavWaypoint` buffer, its speed is zero, or the destination was set after `LockstepNavSystemGroup` updated (it starts on the next tick) |
 | Agents walk through an obstacle | The obstacle is not in the simulation world (a static map object needs `LockstepSceneEntityAuthoring`), lies outside the grid, or is thinner than a cell with an agent radius of zero |
 | Agents stop short of the destination | `isPathPartial`: the destination is blocked or walled in, and the path ends at the closest reachable point |
+| A stat keeps its old value | The entity has no `LockstepStatModifier` buffer (the stat system updates entities with both buffers), the modifier names another stat, or it was added after `LockstepStatSystem` updated (it applies from the next tick) |
+| `LockstepStatSystem` recalculates every tick | A system writes the stats every tick, also by only taking `DynamicBuffer<LockstepStat>` in a `SystemAPI.Query`, which is read-write: read them with `in` in an `IJobEntity` or with a read-only `BufferLookup` |
 | Connections drop when the window loses focus | `Application.runInBackground` is off |
 | A "Burst error" in the console | Burst falls back to managed code silently in some cases; fix the reported construct (for example a managed array in a Burst method) |
 | Desync reports | See [Desync detection and debugging](#desync-detection-and-debugging) |

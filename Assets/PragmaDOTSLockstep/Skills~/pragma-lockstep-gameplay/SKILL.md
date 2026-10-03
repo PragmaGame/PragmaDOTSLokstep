@@ -1,6 +1,6 @@
 ---
 name: pragma-lockstep-gameplay
-description: Write deterministic gameplay for Pragma DOTS Lockstep (package com.pragma.dotslockstep, namespace Pragma.Lockstep) - simulation systems in LockstepSimulationSystemGroup, per-tick input structs and commands, player join/leave, spawning entities and registry prefabs, LockstepEntityId references, navigation and pathfinding around obstacles (LockstepNavGrid, LockstepNavObstacle, LockstepNavAgent, LockstepPathfinder), fixed-point math (FixedPoint, FixedVector2, FixedVector3, FixedQuaternion, FixedMath, FixedRandom) and presenting the simulation with interpolation and GameObject views (EntityView, EntityViewKey, EntityComponentView, EntityViewUpdateSystem, view catalogs and pools, ported from ECV). Use it whenever you add or change anything that runs inside a lockstep simulation world or reads it for rendering - units, movement, combat, abilities, economy, AI, timers, randomness, input handling, views, UI - even if the user never says "deterministic" or "lockstep".
+description: Write deterministic gameplay for Pragma DOTS Lockstep (package com.pragma.dotslockstep, namespace Pragma.Lockstep) - simulation systems in LockstepSimulationSystemGroup, per-tick input structs and commands, player join/leave, spawning entities and registry prefabs, LockstepEntityId references, navigation and pathfinding around obstacles (LockstepNavGrid, LockstepNavObstacle, LockstepNavAgent, LockstepPathfinder), stats with flat, additive and multiplicative modifiers, timed buffs and debuffs (LockstepStat, LockstepStatModifier, LockstepStatSystem), fixed-point math (FixedPoint, FixedVector2, FixedVector3, FixedQuaternion, FixedMath, FixedRandom) and presenting the simulation with interpolation and GameObject views (EntityView, EntityViewKey, EntityComponentView, EntityViewUpdateSystem, view catalogs and pools, ported from ECV). Use it whenever you add or change anything that runs inside a lockstep simulation world or reads it for rendering - units, movement, combat, abilities, economy, AI, timers, randomness, input handling, views, UI - even if the user never says "deterministic" or "lockstep".
 ---
 
 # Gameplay with Pragma DOTS Lockstep
@@ -279,6 +279,24 @@ Units that walk around obstacles use `Pragma.Lockstep.Navigation` (assembly refe
 - **Queries.** `LockstepNavigation.IsWalkable`, `HasLineOfSight`, `TryFindNearestWalkable` for placement checks and AI;
   `LockstepPathfinder` (scratch memory, one per thread) for paths outside agents.
 - Agents do not avoid each other. See `references/simulation-api.md` and the README section *Navigation*.
+
+## Stats
+
+Numbers that upgrades, research, abilities, auras or cover change (health, speed, damage, range) are stats of
+`Pragma.Lockstep.Stats` (assembly reference `Pragma.Lockstep.Stats`), not fields that systems patch by hand:
+
+- **Data.** The game names its stats with an enum cast to `int`. An entity bakes a `LockstepStat` buffer
+  (`LockstepStat.Create(type, baseValue)`) and a `LockstepStatModifier` buffer, empty or not: without it the entity is
+  not updated.
+- **Modifiers.** `LockstepStatModifier.Flat`, `Additive` (shares summed), `Multiplicative` (times 1 + value, stacking),
+  each with a `LockstepStatSource` (kind, id) and an optional `endTick` (`time.tick + durationTicks`). Add them in
+  systems with `[UpdateBefore(typeof(LockstepStatSystem))]`; `LockstepStats.RemoveModifiers(modifiers, source)` ends an
+  effect, and removing before adding again refreshes it instead of stacking.
+- **Reading.** `LockstepStats.TryGetValue(stats, type, out value)` in systems with
+  `[UpdateAfter(typeof(LockstepStatSystem))]`. Apply a stat to another component (agent speed, max health) in an
+  `IJobEntity` with `[WithChangeFilter(typeof(LockstepStat))]` and `in DynamicBuffer<LockstepStat>`: the stat system
+  writes stats only when they change, and a read-write access would make it recalculate them every tick.
+- **Base values.** `LockstepStats.TrySetBase` for permanent changes (a level up); the value follows in the next update.
 
 ## Burst and jobs
 

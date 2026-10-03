@@ -35,6 +35,11 @@ and this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   blocks their way. `LockstepNavSystemGroup` runs `LockstepNavObstacleSystem`, `LockstepNavPathSystem` and
   `LockstepNavMoveSystem`; `LockstepNavGridAuthoring`, `LockstepNavObstacleAuthoring` and `LockstepNavAgentAuthoring`
   bake them, and selecting a grid previews the cells the obstacles block.
+- Stats (`Pragma.Lockstep.Stats`): a `LockstepStat` buffer of base values and values under the game's own stat ids, a
+  `LockstepStatModifier` buffer of flat, additive and multiplicative modifiers, each with a `LockstepStatSource` and an
+  optional end tick, and `LockstepStatSystem`, which removes expired modifiers and recalculates, in parallel and in
+  `FixedPoint`, only the chunks whose stats or modifiers changed. `LockstepStats` reads and changes them
+  (`TryGetValue`, `TryGetBase`, `TrySetBase`, `RemoveModifiers`, `Calculate`).
 - Command data: besides its payload struct (still up to 122 bytes) a command carries data of any length, an array of
   any unmanaged element type, for lists such as the unit ids of an order. `LockstepCommand.Create(payload, data,
   dataBuffer)` writes it into the new `LockstepCommandData` buffer, which the local input entity and every player
