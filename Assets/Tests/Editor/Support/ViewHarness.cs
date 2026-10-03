@@ -15,6 +15,7 @@ namespace Pragma.Lockstep.Tests
         private readonly TransformViewUpdateSystem _transformSystem;
         private readonly SystemBase _dataSystem;
         private readonly TestTimeViewUpdateSystem _timeSystem;
+        private readonly TestViewHiddenUpdateSystem _hiddenSystem;
         private readonly bool _isConfigRegistered;
 
         /// <param name="registerConfig">Registers the catalog of the two prefabs at runtime.</param>
@@ -28,6 +29,7 @@ namespace Pragma.Lockstep.Tests
                 ? World.GetOrCreateSystemManaged<TestVisibleViewDataUpdateSystem>()
                 : World.GetOrCreateSystemManaged<TestViewDataUpdateSystem>();
             _timeSystem = World.GetOrCreateSystemManaged<TestTimeViewUpdateSystem>();
+            _hiddenSystem = World.GetOrCreateSystemManaged<TestViewHiddenUpdateSystem>();
 
             PrefabA = CreatePrefab("TestA view");
             PrefabB = CreatePrefab("TestB view");
@@ -47,7 +49,7 @@ namespace Pragma.Lockstep.Tests
         public EntityView PrefabB { get; }
         public EntityViewConfig Config { get; }
 
-        /// <summary>A view prefab (an inactive template object) with a transform part, both test data parts and a time part.</summary>
+        /// <summary>A view prefab (an inactive template object) with a transform part, both test data parts, a time part and a tag part.</summary>
         public static EntityView CreatePrefab(string name)
         {
             var gameObject = new GameObject(name);
@@ -57,6 +59,7 @@ namespace Pragma.Lockstep.Tests
             gameObject.AddComponent<TestViewDataView>();
             gameObject.AddComponent<TestViewDataRawView>();
             gameObject.AddComponent<TestTimeView>();
+            gameObject.AddComponent<TestViewHiddenView>();
             return view;
         }
 
@@ -72,6 +75,7 @@ namespace Pragma.Lockstep.Tests
             _transformSystem.Update();
             _dataSystem.Update();
             _timeSystem.Update();
+            _hiddenSystem.Update();
         }
 
         /// <summary>A frame in which only the manager system ran, as if the update systems were disabled.</summary>

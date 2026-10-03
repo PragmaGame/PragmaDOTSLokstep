@@ -76,7 +76,8 @@ must live in runtime (non-Editor) assemblies.
 `EntityView`: `Entity`, `Client`, `IsBound`, `IsAttached`, `IsAutoUpdateEnabled` (pauses the pushes, transform
 included; turning it on catches up), `Transform`, `GetComponentView<T>()`, `SetComponentViewEnable<T>(bool)`,
 `UpdateData<T>(T)`, `UpdateData(IComponentData)`, `IsHasHandler(Type)`, `IsHasHandlers(params Type[])`,
-`RefreshComponentViews()`.
+`RefreshComponentViews()`, `TryGetData<T>(out T)` (reads any component of the entity from the simulation world; false
+while unbound or when the entity lacks it).
 
 `EntityViewManagerSystem` spawns and returns views when a tick created, destroyed or re-keyed keyed entities (and
 right away when a view was destroyed from outside): views of entities that went away or changed their key are returned
@@ -126,11 +127,14 @@ EntityViewManagerSystem.PoolFactory = world => new PragmaPoolEntityViewPool(pool
   to another archetype, which changes the chunk order, the state hash and the order `LockstepEntityId`s are assigned in.
 - Local state (selection, hover, fog of war visibility, "is mine") belongs to the presentation: compare `data.slot`
   with `View.Client.LocalSlot`, keep selection on the view or in UI code, send changes as commands.
-- `view.Entity` is valid only in this process and session. Commands refer to `LockstepEntityId`: read it from the
-  simulation world with `view.Entity`.
+- `view.Entity` is valid only in this process and session. Commands refer to `LockstepEntityId`: read it with
+  `view.TryGetData<LockstepEntityId>(out var id)`.
 - Parts run on the main thread for every push: keep `UpdateData` cheap and prefer `EntityComponentViewUnmanaged<T>`.
 - A view that misses a type has no `EntityViewUpdateSystem<T>`.
 - Pooled instances keep what their parts changed: restore it in `BindBreak` or `Bind`. `IsAutoUpdateEnabled` comes back
   on by itself when a view is unbound.
 - Parts learn values, not absence: when `T` is removed or disabled the entity leaves the query and the part gets no
   call. A part for a tag can only ever show "on"; use a `bool` field for presence.
+- A view is returned in the frame its entity is destroyed. Death animations need the entity to stay in a dying state
+  for as many ticks (a deterministic countdown), or a part that leaves an effect behind in `BindBreak`. To remove the
+  view of an entity that stays (a unit inside a transport), set its key to `default`: an unbound key gets no view.

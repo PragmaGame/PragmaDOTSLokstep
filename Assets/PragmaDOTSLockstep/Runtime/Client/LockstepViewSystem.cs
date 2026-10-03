@@ -100,16 +100,12 @@ namespace Pragma.Lockstep
                 }
                 _alive.Add(simulationEntity);
 
-                if (!simulationManager.HasComponent<LockstepTransform>(simulationEntity) || !EntityManager.HasComponent<LocalTransform>(view))
+                var createdAt = _createdAtTick.TryGetValue(simulationEntity, out var tick) ? tick : lastTick;
+                if (EntityManager.HasComponent<LocalTransform>(view) &&
+                    simulationManager.TryGetInterpolated(simulationEntity, lastTick, alpha, createdAt, out var transform))
                 {
-                    continue;
+                    EntityManager.SetComponentData(view, transform);
                 }
-                var current = simulationManager.GetComponentData<LockstepTransform>(simulationEntity);
-                var canInterpolate = _createdAtTick.TryGetValue(simulationEntity, out var createdAt) && lastTick > createdAt;
-                var transform = canInterpolate && simulationManager.HasComponent<LockstepTransformPrevious>(simulationEntity)
-                    ? LockstepTransformExtensions.Interpolate(current, simulationManager.GetComponentData<LockstepTransformPrevious>(simulationEntity), lastTick, alpha)
-                    : current.ToLocalTransform();
-                EntityManager.SetComponentData(view, transform);
             }
 
             _stale.Clear();

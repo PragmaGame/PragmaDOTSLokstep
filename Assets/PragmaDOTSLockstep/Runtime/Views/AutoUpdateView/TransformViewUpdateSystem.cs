@@ -17,19 +17,13 @@ namespace Pragma.Lockstep.Views
     public partial class TransformViewUpdateSystem : SystemBase
     {
         private readonly List<EntityView> _views = new List<EntityView>();
-        private EntityViewManagerSystem _managerSystem;
 
         protected override void OnUpdate()
         {
-            if (_managerSystem == null)
+            if (!EntityViewManager.TryGet(World, out var manager))
             {
-                _managerSystem = World.GetExistingSystemManaged<EntityViewManagerSystem>();
-                if (_managerSystem == null)
-                {
-                    return;
-                }
+                return;
             }
-            var manager = _managerSystem.Manager;
             var simulation = manager.Simulation;
             if (simulation == null || !simulation.World.IsCreated || manager.ViewCount == 0)
             {
@@ -56,20 +50,11 @@ namespace Pragma.Lockstep.Views
                     manager.RequestScan();
                     continue;
                 }
-                if (!view.IsBound || !view.IsAutoUpdateEnabled || !view.IsHasHandler(typeof(LocalTransform)))
+                if (view.IsBound && view.IsAutoUpdateEnabled && view.IsHasHandler(typeof(LocalTransform)) &&
+                    simulationManager.TryGetInterpolated(view.Entity, lastTick, alpha, view.BoundAtTick, out var transform))
                 {
-                    continue;
+                    view.UpdateData(transform);
                 }
-                var entity = view.Entity;
-                if (!simulationManager.HasComponent<LockstepTransform>(entity))
-                {
-                    continue;
-                }
-                var current = simulationManager.GetComponentData<LockstepTransform>(entity);
-                var transform = lastTick > view.BoundAtTick && simulationManager.HasComponent<LockstepTransformPrevious>(entity)
-                    ? LockstepTransformExtensions.Interpolate(current, simulationManager.GetComponentData<LockstepTransformPrevious>(entity), lastTick, alpha)
-                    : current.ToLocalTransform();
-                view.UpdateData(transform);
             }
             _views.Clear();
         }

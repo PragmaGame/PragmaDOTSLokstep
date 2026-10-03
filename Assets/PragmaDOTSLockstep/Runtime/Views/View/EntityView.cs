@@ -17,7 +17,7 @@ namespace Pragma.Lockstep.Views
     /// </remarks>
     [DisallowMultipleComponent]
     [AddComponentMenu("Pragma/Lockstep/Entity View")]
-    public class EntityView : MonoBehaviour, IEntityView
+    public class EntityView : MonoBehaviour
     {
         private Dictionary<Type, List<IEntityComponentView>> _componentViews;
         private Transform _transform;
@@ -166,30 +166,28 @@ namespace Pragma.Lockstep.Views
             }
         }
 
-        /// <summary>Tells the parts the view got an entity; the manager calls it.</summary>
-        public void Bind()
+        /// <summary>
+        /// Reads the current <typeparamref name="T"/> of the entity shown straight from the simulation world, for values
+        /// no part is fed: the <see cref="LockstepEntityId"/> a command about this entity needs, a limit read once in
+        /// <c>Bind</c>.
+        /// </summary>
+        /// <returns>
+        /// False while the view is not bound or when the entity has no <typeparamref name="T"/>. A disabled component is
+        /// read all the same; a tag reads as <c>default</c>.
+        /// </returns>
+        public bool TryGetData<T>(out T data) where T : unmanaged, IComponentData
         {
-            EnsureInitialized();
-            foreach (var views in _componentViews.Values)
+            data = default;
+            var world = Client?.Simulation?.World;
+            if (world == null || !world.IsCreated || !world.EntityManager.HasComponent<T>(Entity))
             {
-                for (var i = 0; i < views.Count; i++)
-                {
-                    views[i].Bind();
-                }
+                return false;
             }
-        }
-
-        /// <summary>Tells the parts the view is about to lose its entity; the manager calls it.</summary>
-        public void BindBreak()
-        {
-            EnsureInitialized();
-            foreach (var views in _componentViews.Values)
+            if (!TypeManager.IsZeroSized(TypeManager.GetTypeIndex<T>()))
             {
-                for (var i = 0; i < views.Count; i++)
-                {
-                    views[i].BindBreak();
-                }
+                data = world.EntityManager.GetComponentData<T>(Entity);
             }
+            return true;
         }
 
         /// <summary>Collects the component views again, after parts were added or removed at runtime.</summary>
@@ -219,6 +217,32 @@ namespace Pragma.Lockstep.Views
             Client = null;
             // A pooled instance starts its next binding like a fresh one, not paused by its previous owner.
             _isAutoUpdateEnabled = true;
+        }
+
+        // Only the manager binds: a part told by anyone else that its view lost the entity would restore its pooled state
+        // while the view still shows that entity.
+        private void Bind()
+        {
+            EnsureInitialized();
+            foreach (var views in _componentViews.Values)
+            {
+                for (var i = 0; i < views.Count; i++)
+                {
+                    views[i].Bind();
+                }
+            }
+        }
+
+        private void BindBreak()
+        {
+            EnsureInitialized();
+            foreach (var views in _componentViews.Values)
+            {
+                for (var i = 0; i < views.Count; i++)
+                {
+                    views[i].BindBreak();
+                }
+            }
         }
 
         // Lazy rather than in Awake alone: Awake does not run for instances created in edit mode or spawned inactive.

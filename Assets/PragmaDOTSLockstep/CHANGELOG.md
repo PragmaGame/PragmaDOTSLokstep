@@ -18,6 +18,10 @@ and this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pool abstraction: `IEntityViewPool`, chosen per project with `EntityViewManagerSystem.PoolFactory` or per world with
   `EntityViewManagerSystem.Pool`; `EntityViewPool` is the default.
 - `EntityViewManager`: views by entity, `Attach`/`Detach` for views the caller owns (HUD panels), `ForceUpdate`.
+- `EntityView.TryGetData<T>`: reads a component of the entity shown from the simulation world (its `LockstepEntityId`
+  for commands).
+- `LockstepTransformExtensions.TryGetInterpolated`: reads and interpolates the transform of a simulation entity with the
+  rule both view systems use.
 - The sample shows its avatars and projectiles with GameObject views.
 
 ## [1.0.0] - 2026-10-03

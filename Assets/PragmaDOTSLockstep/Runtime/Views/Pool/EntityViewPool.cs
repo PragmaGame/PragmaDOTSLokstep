@@ -10,8 +10,8 @@ namespace Pragma.Lockstep.Views
     /// under a root object and reuses them per prefab. Disposing it destroys every instance it created.
     /// </summary>
     /// <remarks>
-    /// The root survives scene loads (in play mode), because a simulation world is not tied to a scene. In an RTS with
-    /// fog of war entities appear and disappear all the time; reusing instances avoids an Instantiate and a Destroy each.
+    /// The root survives scene loads (in play mode), because a simulation world is not tied to a scene. Projectiles,
+    /// effects and units come and go all the time; reusing instances avoids an Instantiate and a Destroy each.
     /// </remarks>
     public sealed class EntityViewPool : IEntityViewPool, IDisposable
     {

@@ -337,6 +337,26 @@ namespace Pragma.Lockstep.Tests
         }
 
         [Test]
+        public void ViewData_TagsArePushedWhenTheyTurnOn()
+        {
+            using (var session = new SessionHarness(Settings()))
+            using (var views = new ViewHarness())
+            {
+                var client = AddClient(session);
+                views.Show(client);
+                views.Run(session, client, 7);
+                var part = views.SpawnedView().GetComponent<TestViewHiddenView>();
+                Assert.AreEqual(0, part.pushCount, "a disabled tag is absent");
+
+                views.Run(session, client, 8);
+                Assert.AreEqual(1, part.pushCount, "turning it on pushes it");
+
+                views.Run(session, client, 20);
+                Assert.AreEqual(1, part.pushCount, "turning it off pushes nothing: parts learn values, not absence");
+            }
+        }
+
+        [Test]
         public void ViewData_SeesWritesMadeOutsideSystems()
         {
             using (var session = new SessionHarness(Settings()))
@@ -496,6 +516,41 @@ namespace Pragma.Lockstep.Tests
         }
 
         [Test]
+        public void ViewCatalog_SeesEditsMadeWithoutASession()
+        {
+            using (var session = new SessionHarness(Settings()))
+            using (var views = new ViewHarness(registerConfig: false))
+            {
+                var entityManager = views.World.EntityManager;
+                var registry = entityManager.CreateEntity(typeof(EntityViewRegistry), typeof(EntityViewPrefabElement));
+                entityManager.GetBuffer<EntityViewPrefabElement>(registry).Add(new EntityViewPrefabElement
+                {
+                    key = TestViewSpawnSystem.KEY_A,
+                    prefab = views.PrefabA.gameObject,
+                });
+                var client = AddClient(session);
+                views.Show(client);
+                views.Run(session, client, 5);
+                LockstepWorlds.UnregisterClient(views.World);
+                views.Update();
+
+                // Live baking edits a registry in place: only its change version tells.
+                var elements = entityManager.GetBuffer<EntityViewPrefabElement>(registry);
+                elements[0] = new EntityViewPrefabElement
+                {
+                    key = TestViewSpawnSystem.KEY_A,
+                    prefab = views.PrefabB.gameObject,
+                };
+                views.Update();
+                views.Update();
+
+                views.Show(client);
+                views.Update();
+                Assert.AreEqual("TestB view", views.SpawnedView().name);
+            }
+        }
+
+        [Test]
         public void ViewData_IsPushedInFullAfterAMissedFrame()
         {
             using (var session = new SessionHarness(Settings()))
@@ -574,6 +629,56 @@ namespace Pragma.Lockstep.Tests
             {
                 pool.Dispose();
                 Object.DestroyImmediate(prefab.gameObject);
+            }
+        }
+
+        [Test]
+        public void EntityView_ReadsTheDataOfItsEntity()
+        {
+            using (var session = new SessionHarness(Settings()))
+            using (var views = new ViewHarness())
+            {
+                var client = AddClient(session);
+                views.Show(client);
+                views.Run(session, client, 10);
+                var view = views.SpawnedView();
+                Assert.IsTrue(view.TryGetData<TestViewData>(out var data));
+                Assert.AreEqual(1, data.value);
+                Assert.IsTrue(view.TryGetData<TestViewHidden>(out _), "a tag is read on or off");
+                Assert.IsFalse(view.TryGetData<LockstepEntityId>(out _), "the entity has no id");
+
+                // Tick 25 changes the key, which returns this view to the pool.
+                views.Run(session, client, 25);
+                Assert.IsFalse(view.TryGetData<TestViewData>(out _), "an unbound view reads nothing");
+            }
+        }
+
+        [Test]
+        public void EntityView_LeavesNestedViewsTheirParts()
+        {
+            using (var session = new SessionHarness(Settings()))
+            using (var views = new ViewHarness())
+            {
+                var client = AddClient(session);
+                views.Show(client);
+                views.Run(session, client, 5);
+                var hud = ViewHarness.CreatePrefab("HUD");
+                var nested = ViewHarness.CreatePrefab("Nested");
+                nested.transform.SetParent(hud.transform, false);
+                nested.gameObject.SetActive(true);
+                hud.gameObject.SetActive(true);
+                try
+                {
+                    Assert.IsTrue(views.Manager.Attach(SimulatedEntity(client), hud));
+                    views.Update();
+                    CollectionAssert.AreEqual(new[] { 0 }, hud.GetComponent<TestViewDataRawView>().values);
+                    CollectionAssert.IsEmpty(nested.GetComponent<TestViewDataRawView>().values, "the parts under a nested view are its own");
+                    Assert.IsFalse(nested.IsBound);
+                }
+                finally
+                {
+                    Object.DestroyImmediate(hud.gameObject);
+                }
             }
         }
 

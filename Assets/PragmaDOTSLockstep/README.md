@@ -771,6 +771,10 @@ playout clock is between the previous and the latest simulated tick. Entities wi
 start-of-tick transform, and `LockstepTransformExtensions.Interpolate(current, previous, simulation.Tick - 1, alpha)`
 returns the blended `LocalTransform`. It returns the current value when the previous transform was not captured on the
 latest tick (a newly created entity), so new entities never slide in from the origin.
+`simulationManager.TryGetInterpolated(entity, lastTick, alpha, shownSinceTick, out var transform)` reads both
+components and applies the rule of the package's views: the current value until the tick after `shownSinceTick` (the
+last simulated tick when your view of the entity appeared), because an entity copied from a live one during a tick
+carries that entity's capture.
 
 ### GameObject views
 
@@ -843,17 +847,23 @@ simulation world, not even a cleanup component, so views cannot cause desyncs.
 | `manager.ForceUpdate(entity)` | Push every value of the entity again at the next update |
 | `view.Entity`, `view.Client`, `view.IsBound`, `view.IsAttached` | What a view shows |
 | `view.IsAutoUpdateEnabled` | Pause the pushes, transform included; turning it back on catches up |
+| `view.TryGetData<T>(out data)` | Read any component of the entity from the simulation world, such as its `LockstepEntityId` |
 | `view.GetComponentView<T>()`, `view.SetComponentViewEnable<T>(bool)`, `view.UpdateData(data)` | Reach or drive the parts by hand |
 | `view.RefreshComponentViews()` | Collect the parts again after adding some at runtime |
 
 `Entity` values work as keys only in this process and session. To send a command about the unit under the cursor,
-read its `LockstepEntityId` from the simulation world. State that is local to one player (selection, hover, fog of war
-visibility) belongs to the presentation: keep it on the views, never in the simulation.
+read its id with `view.TryGetData<LockstepEntityId>(out var id)`. State that is local to one player (selection, hover,
+fog of war visibility) belongs to the presentation: keep it on the views, never in the simulation.
 
 A pooled instance keeps whatever its parts changed on it: restore that in `BindBreak` (or `Bind`).
 `EntityComponentViewUnmanaged<T>` forgets its cached value on `Bind`, and unbinding turns `IsAutoUpdateEnabled` back on.
 Parts learn values, not absence: when `T` is removed or disabled the entity leaves the query and the part gets no call,
 so show presence with a field (a `bool`) rather than with a tag.
+
+A view goes back to the pool in the frame its entity is destroyed. For a death animation, keep the entity in a dying
+state for as many ticks as the animation lasts (a countdown in the simulation, the same on every client), or let a part
+leave an effect behind in `BindBreak`. To take the view away from an entity that stays (a unit inside a transport), set
+its key to `default`: a key no catalog binds gets no view.
 
 #### The view pool
 
@@ -896,7 +906,7 @@ public sealed class PragmaPoolEntityViewPool : IEntityViewPool
 EntityViewManagerSystem.PoolFactory = world => new PragmaPoolEntityViewPool(poolService);
 ```
 
-### Entity views: LockstepViewSystem
+### Entities Graphics copies: LockstepViewSystem
 
 `LockstepViewSystem` runs in presentation worlds and mirrors the simulation into rendered entities:
 
@@ -1253,7 +1263,7 @@ Copy-Item -Recurse -Force (Resolve-Path "Library/PackageCache/com.pragma.dotsloc
 | "The input set on the client is N bytes but the session input size is M bytes" | `InputSize` does not match the struct written with `LockstepLocalInput.Set` |
 | The match never starts | `MinPlayersToStart` is higher than the number of players; call `RequestStart` |
 | Nothing moves although the session runs | The gameplay systems are not in `LockstepSimulationSystemGroup`, or no system writes `LockstepLocalInput` |
-| Entity views do not appear | No `LockstepPrefabRegistryAuthoring` in the presentation world, the entity was not instantiated from the registry, or the simulation started before the subscene loaded (`waitForPrefabRegistry`) |
+| Entities Graphics copies do not appear | No `LockstepPrefabRegistryAuthoring` in the presentation world, the entity was not instantiated from the registry, or the simulation started before the subscene loaded (`waitForPrefabRegistry`) |
 | GameObject views do not appear | The entity has no `EntityViewKey`, no catalog binds its key (keys are case-sensitive), or the catalog was baked into a subscene that did not load into this world: register it with `EntityViewConfigProvider` |
 | A GameObject view misses a component | No `EntityViewUpdateSystem<T>` subclass for that type, or the part sits under a nested `EntityView` |
 | A GameObject view does not move | No `TransformComponentView` on it, or the entity has no `LockstepTransform`; without `LockstepTransformPrevious` it moves in steps |

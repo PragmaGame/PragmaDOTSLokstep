@@ -96,6 +96,12 @@ namespace Pragma.Lockstep.Views
         protected override void OnUpdate()
         {
             _manager.BeginFrame();
+            // Watched without a session too: a registry edited in place is seen only by the update right after the edit.
+            if (HasCatalogChanged())
+            {
+                RebuildCatalog();
+                _isScanRequired = true;
+            }
 
             LockstepWorlds.TryGetClient(World, out var client);
             var simulation = client?.Simulation;
@@ -110,11 +116,6 @@ namespace Pragma.Lockstep.Views
                 _simulationWorld = simulation.World;
                 _keyQuery = _simulationWorld.EntityManager.CreateEntityQuery(ComponentType.ReadOnly<EntityViewKey>());
                 _manager.SetClient(client);
-                _isScanRequired = true;
-            }
-            if (HasCatalogChanged())
-            {
-                RebuildCatalog();
                 _isScanRequired = true;
             }
 

@@ -22,7 +22,6 @@ namespace Pragma.Lockstep.Views
     {
         private readonly List<ComponentType> _enableableTypes = new List<ComponentType>();
         private DynamicComponentTypeHandle[] _enableableHandles = Array.Empty<DynamicComponentTypeHandle>();
-        private EntityViewManagerSystem _managerSystem;
         private World _simulationWorld;
         private EntityQuery _query;
         private bool _isZeroSized;
@@ -45,15 +44,10 @@ namespace Pragma.Lockstep.Views
 
         protected override void OnUpdate()
         {
-            if (_managerSystem == null)
+            if (!EntityViewManager.TryGet(World, out var manager))
             {
-                _managerSystem = World.GetExistingSystemManaged<EntityViewManagerSystem>();
-                if (_managerSystem == null)
-                {
-                    return;
-                }
+                return;
             }
-            var manager = _managerSystem.Manager;
             var simulation = manager.Simulation;
             if (simulation == null || !simulation.World.IsCreated)
             {

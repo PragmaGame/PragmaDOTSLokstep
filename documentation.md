@@ -60,7 +60,7 @@ ECV, the view layer of the author's own DawnOfWar project, adapted to lockstep.
 | Late join | Not implemented | Snapshot from another client | Re-simulation from tick 0 |
 | Replays | Event log, timeline window | Input history + checksums, verification | Frames + checksums, verification |
 | Offline | Local transport | Local mode | Offline mode over the same protocol (loopback) |
-| Presentation | Views module, interpolation from a world copy | Entity views, four frames, misprediction smoothing | GameObject views ported from ECV, `LockstepViewSystem` entity views, direct reads; `LockstepTransformPrevious` interpolation |
+| Presentation | Views module, interpolation from a world copy | Entity views, four frames, misprediction smoothing | GameObject views ported from ECV, `LockstepViewSystem` Entities Graphics copies, direct reads; `LockstepTransformPrevious` interpolation |
 | Transport | Photon, Ragon, local | Photon Realtime | Netcode for Entities RPC, loopback, custom `ILockstepTransport` |
 
 ## Taken from Photon Quantum
@@ -109,7 +109,7 @@ the clients diverge. The port keeps the shape and replaces everything that wrote
 
 | Idea | In ECV | In this package |
 |---|---|---|
-| Root view plus one part per component type | `EntityView`, `EntityComponentView<T>`, `IEntityComponentView<T>` | Same names and members; several parts may show one type; parts of nested views stay with their own root |
+| Root view plus one part per component type | `EntityView`, `EntityComponentView<T>`, `IEntityComponentView<T>` | Same names and members, except that only the manager binds a root; several parts may show one type; parts of nested views stay with their own root |
 | Parts that react to changes only | `EntityComponentViewUnmanaged<T>` with `EqualityComparer<T>` | Same, compared bytewise (the default comparer of a struct without `IEquatable` reflects and boxes) |
 | Cache reset when a pooled view is reused | `Bind` clears the last value | Same |
 | One generic system per component type | `EntityViewUpdateSystem<T>` with a change filter and `ConfigureQuery` | Same API; chunks of the simulation world filtered by its change versions, plus every value for views spawned, attached or forced since the last push |
@@ -134,6 +134,10 @@ the clients diverge. The port keeps the shape and replaces everything that wrote
   spawned since the last push get every value, which replaces ECV's `forceUpdateVersion` write.
 - **Pool state.** A pooled view starts every binding fresh: the cached values of its parts are forgotten and
   auto-update comes back on, so a previous owner's pause or value never leaks to the next entity.
+- **Binding belongs to the manager.** ECV binds in the pool's spawn and release callbacks, so the root's `Bind` and
+  `BindBreak` are public. Here the manager binds right after `Spawn` and unbinds right before `Release`, whatever the
+  pool, and the root's methods are private: a part told by anyone else that its entity is gone would restore its pooled
+  state while still on screen.
 - **A key in the simulation.** ECV keys views by `EntityIdentifier`, part of another framework. `EntityViewKey` is
   ordinary simulation data, so entities created in code (the sample) get views as well as baked prefabs, and changing
   the key swaps the view.
@@ -148,6 +152,7 @@ the clients diverge. The port keeps the shape and replaces everything that wrote
 
 - `ViewReferenceComponent` (a managed reference from the entity to its view) and `AutoUpdateViewTagComponent`: both
   live on the shown entity. `EntityViewManager.TryGetView` and `EntityView.IsAutoUpdateEnabled` replace them.
+- `IEntityView`: nothing consumed it in ECV either; the manager and the pools work with `EntityView`.
 - `ConfigStorageComponent` and `EntityConfig`: configuration storage built on managed components and DOTS.Common
   commands, not part of the views.
 - The editor preview of authored data on view prefabs (`IEntityAuthoringRefreshHandler`): it belongs to the
