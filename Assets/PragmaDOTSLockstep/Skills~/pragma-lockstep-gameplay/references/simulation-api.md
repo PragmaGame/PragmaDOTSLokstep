@@ -12,6 +12,7 @@ camelCase; settings and options are PascalCase properties.
 - Transforms
 - Entity ids
 - Prefab registry
+- Navigation
 - Bytes helpers
 - Presentation-side access
 - Authoring components
@@ -130,6 +131,26 @@ The registry entity always exists in simulation worlds made by the built-in syst
 indexing, and use `waitForPrefabRegistry` when starting the session so the simulation is created after the subscene
 loaded.
 
+## Navigation
+
+Namespace and assembly `Pragma.Lockstep.Navigation`.
+
+| Type | Members |
+|---|---|
+| `LockstepNavGrid` | Singleton. `FixedVector2 origin` (corner of cell 0, 0 on X and Z), `FixedPoint cellSize`, `int width`, `int height`, `FixedPoint agentRadius`, `uint version` (changes with any cell); `CellCount`, `IsValid`, `Contains`, `GetIndex`, `GetCell`, `WorldToCell`, `GetCellCenter`, `ClampToGrid` |
+| `LockstepNavCell` | Buffer on the grid entity, row by row along X: `ushort blockers`, `IsWalkable`. Sized by `LockstepNavObstacleSystem` |
+| `LockstepNavObstacle` | `FixedVector2 center`, `FixedVector2 size`: a rectangle in the space of the entity's `LockstepTransform` (yaw, uniform scale), world space without one |
+| `LockstepNavObstacleFootprint` | Cleanup component the obstacle system writes: the stamped world rectangle (`center`, `right`, `halfSize`, `Forward`); `Create(obstacle, transform)`, `Create(obstacle)` |
+| `LockstepNavAgent` | `speed`, `angularSpeed` (radians per second, 0 turns at once), `stoppingDistance`, `destination`, `status`, `isPathPartial`, `waypointIndex`, `gridVersion`; `SetDestination(FixedVector3)`, `Stop()`, `IsMoving` |
+| `LockstepNavStatus` | `Idle`, `Requested` (planned in the next navigation update), `Moving`, `Arrived` |
+| `LockstepNavWaypoint` | Buffer: `FixedVector3 position`; the path, end included, Y of the destination |
+| `LockstepNavSystemGroup` | In `LockstepSimulationSystemGroup`: `LockstepNavObstacleSystem` (first), `LockstepNavPathSystem`, `LockstepNavMoveSystem`. Set destinations before it |
+| `LockstepPathfinder` | `new LockstepPathfinder(cellCount, allocator)`, `FindPath(grid, cells, start, destination, NativeList<FixedVector3> or DynamicBuffer<LockstepNavWaypoint>)` returns `LockstepPathStatus` (`Failed`, `Complete`, `Partial`), `Dispose()`. Keeps scratch memory; one per thread |
+| `LockstepNavigation` | `IsWalkable(grid, cells, cell or position)`, `HasLineOfSight(grid, cells, from, to)` (exact, corners count both sides), `TryFindNearestWalkable(grid, cells, cell, out nearest)`, `Stamp(grid, cells, footprint, count)` for previews and tests |
+
+Read the cells with `SystemAPI.GetSingletonBuffer<LockstepNavCell>(true).AsNativeArray()` and the grid with
+`SystemAPI.GetSingleton<LockstepNavGrid>()`.
+
 ## Bytes helpers
 
 `LockstepBytes.ToFixedList64(in T)`, `ToFixedList128(in T)`, `Read<T>(in FixedList64Bytes<byte>)`,
@@ -159,6 +180,11 @@ Namespace `Pragma.Lockstep.Authoring`:
 - `LockstepEntityIdAuthoring` - adds `LockstepEntityId`.
 - `EntityViewKeyAuthoring` - adds `EntityViewKey`, so instances get the GameObject view bound to the key.
 - `EntityViewConfigAuthoring` - bakes an `EntityViewConfig` catalog into the presentation world (not for servers).
+- `LockstepNavGridAuthoring` - the navigation grid of a map (size, cell size, agent radius); needs and adds
+  `LockstepSceneEntityAuthoring`. Selecting it previews the blocked cells.
+- `LockstepNavObstacleAuthoring` - a box whose X and Z block the grid; moves with a `LockstepTransformAuthoring` next to
+  it, otherwise its pose is baked (static map content, add `LockstepSceneEntityAuthoring`).
+- `LockstepNavAgentAuthoring` - `LockstepNavAgent` and its waypoint buffer; needs `LockstepTransformAuthoring`.
 
 For your own data, write regular bakers and convert floats to `FixedPoint` in the baker (`(FixedPoint)authoring.speed`): baking
 happens once, so every client loads the same raw values.

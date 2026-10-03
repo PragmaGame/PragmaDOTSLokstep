@@ -28,6 +28,13 @@ and this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with their linked entities, after the prefab registry and before tick 0, in an order baked from the objects'
   identities (`LockstepSceneEntity.order`), so the result does not depend on the order subscenes loaded in.
   `LockstepPrefabUtility.CopySceneEntities` does the copy for custom flows.
+- Navigation (`Pragma.Lockstep.Navigation`): a walkability grid (`LockstepNavGrid` with its `LockstepNavCell`
+  buffer), obstacles (`LockstepNavObstacle`) that block cells while their entity exists, A* with string pulling in
+  integer math (`LockstepPathfinder`, queries in `LockstepNavigation`) and agents (`LockstepNavAgent`,
+  `LockstepNavWaypoint`) that walk their paths in `FixedPoint`, plan in parallel and plan again when an obstacle
+  blocks their way. `LockstepNavSystemGroup` runs `LockstepNavObstacleSystem`, `LockstepNavPathSystem` and
+  `LockstepNavMoveSystem`; `LockstepNavGridAuthoring`, `LockstepNavObstacleAuthoring` and `LockstepNavAgentAuthoring`
+  bake them, and selecting a grid previews the cells the obstacles block.
 
 ## [1.0.0] - 2026-10-03
 

@@ -4,6 +4,7 @@
     "references": [
         "Pragma.Lockstep",
         "Pragma.Lockstep.Mathematics",
+        "Pragma.Lockstep.Navigation",
         "Pragma.Lockstep.Netcode",
         "Pragma.Lockstep.Views",
         "Pragma.Lockstep.Tests.Runtime",

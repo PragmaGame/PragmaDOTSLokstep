@@ -19,6 +19,7 @@ simulated entities.
 - [Writing the simulation](#writing-the-simulation)
 - [Determinism rules](#determinism-rules)
 - [Fixed-point math](#fixed-point-math)
+- [Navigation](#navigation)
 - [Sessions](#sessions)
 - [Presentation](#presentation)
 - [Timing and latency](#timing-and-latency)
@@ -47,6 +48,7 @@ It is a poor fit for:
 - Shooters, fighting and racing games where input delay must be hidden. This package is strict lockstep: there is
   no client-side prediction or rollback (yet). Use Netcode for Entities ghosts with prediction for those games.
 - Simulations that depend on float-based engine systems (Unity Physics, NavMesh, Animator) for gameplay results.
+  Unit movement around obstacles is covered: the package has its own deterministic [navigation](#navigation).
 
 ## Features
 
@@ -65,6 +67,8 @@ It is a poor fit for:
   to land just in time. Confirmed frames go through a jitter-aware playout buffer with a catch-up budget.
 - **Desync detection.** Clients hash their whole simulation state; the server compares the hashes by majority and
   tells everybody which client diverged. A per-component breakdown shows what diverged.
+- **Navigation.** A walkability grid, obstacles that block it while their entity exists, A* with string pulling in
+  integer math and agents that walk the paths in `FixedPoint`, planning again when obstacles change.
 - **Late join.** A player joining a running match re-simulates it from tick 0 while new frames keep streaming in.
 - **Replays.** Export from a client or the server and play back with checksum verification.
 - **Offline mode.** The same protocol over an in-process loopback: single player exercises the complete code path.
@@ -529,6 +533,8 @@ integer tick counters (`cooldownTicks = tickRate / 2`), which are exact; the sam
 - `UnityEngine.Random`, `System.Random`.
 - `float`, `double`, `Mathf`, `Unity.Mathematics` float types for anything that affects the state.
 - Static fields, system fields that carry state between ticks, managed components and managed objects.
+- Unity Physics, NavMesh and Animator results: write collisions in `FixedPoint` and move units with the package's
+  [navigation](#navigation).
 - Anything local: the local player, the camera, devices, the frame rate, the platform. The simulation is the same
   everywhere; local effects belong to the presentation.
 - Other worlds. And nothing outside the lockstep systems may write to the simulation world.
@@ -665,6 +671,77 @@ PCG32 (XSH-RR) with 128 bits of state, seeded through SplitMix64.
 
 `FixedPoint` fields are edited as decimal numbers, `FixedVector2`/`FixedVector3` as vectors and `FixedQuaternion` as Euler angles in degrees.
 The editor converts once and stores raw values.
+
+## Navigation
+
+`Pragma.Lockstep.Navigation` walks units around obstacles inside the simulation: a walkability grid on the XZ plane,
+A* in integer math, string pulling, and agents that follow the paths in `FixedPoint`. NavMesh cannot drive gameplay in
+lockstep: it works in floats, is built per platform and answers differently on different machines.
+
+| Type | What it is |
+|---|---|
+| `LockstepNavGrid` | Singleton: origin, cell size, width, height, agent radius and a version that changes with the cells. The cells are the `LockstepNavCell` buffer of the same entity: the number of obstacles over each cell |
+| `LockstepNavObstacle` | A rectangle (center, size) in the space of the entity's `LockstepTransform` (yaw and uniform scale apply), or in world space without one. It blocks every cell whose centre is within the agent radius of it |
+| `LockstepNavAgent` | Speed, angular speed and stopping distance of a unit that walks, its destination and status (`Idle`, `Requested`, `Moving`, `Arrived`). The path is its `LockstepNavWaypoint` buffer |
+| `LockstepNavSystemGroup` | Inside `LockstepSimulationSystemGroup`: `LockstepNavObstacleSystem` stamps obstacles, `LockstepNavPathSystem` plans and checks paths in parallel, `LockstepNavMoveSystem` walks agents |
+| `LockstepPathfinder`, `LockstepNavigation` | The search and the grid queries (`IsWalkable`, `HasLineOfSight`, `TryFindNearestWalkable`, `Stamp`) for systems of your own |
+
+### Setting it up
+
+1. Add a `LockstepNavGridAuthoring` to the subscene of the map (it brings a `LockstepSceneEntityAuthoring`): the size
+   in world units, centred on the GameObject, the cell size and the agent radius. Selecting it previews the cells the
+   obstacles of the open scenes block.
+2. Give obstacles a `LockstepNavObstacleAuthoring`. On a prefab with a `LockstepTransformAuthoring` the rectangle moves
+   and turns with the entity (buildings spawned from the registry). On a static map object, add a
+   `LockstepSceneEntityAuthoring`: the pose is baked, non-uniform scale included. Scene entities are copied whole into
+   the simulation, so keep renderers off the obstacle's GameObject (a child works).
+3. Give units a `LockstepNavAgentAuthoring` (next to a `LockstepTransformAuthoring`).
+4. Set destinations from a system that updates before `LockstepNavSystemGroup`; the agent plans its path and takes its
+   first step on the same tick:
+
+```csharp
+[UpdateInGroup(typeof(LockstepSimulationSystemGroup))]
+[UpdateBefore(typeof(LockstepNavSystemGroup))]
+public partial struct MoveOrderSystem : ISystem
+{
+    public void OnUpdate(ref SystemState state)
+    {
+        foreach (var (agent, order) in SystemAPI.Query<RefRW<LockstepNavAgent>, RefRO<MoveOrder>>())
+        {
+            agent.ValueRW.SetDestination(order.ValueRO.target);
+        }
+    }
+}
+```
+
+`LockstepNavAgent.Stop()` stops an agent where it stands.
+
+### Behaviour
+
+- **Paths.** A* over the eight neighbours of a cell with integer costs (10 straight, 14 diagonal) and an octile
+  heuristic. A diagonal step needs both cells beside it free, so paths never cut a blocked corner. String pulling keeps
+  a corner only where the straight line is blocked. Line of sight is traced exactly through the cell borders, and a
+  segment through a cell corner counts both cells beside it.
+- **Blocked and unreachable destinations.** A destination in a blocked cell moves to the nearest free cell. When the
+  destination cannot be reached at all, the path ends at the reachable cell closest to it and `isPathPartial` is set.
+  An agent standing in an obstacle (a building placed on top of it) first walks to the nearest free cell.
+- **Changing obstacles.** Obstacles block cells while their entity exists. Spawning, moving, resizing or destroying one
+  updates the cells on the next navigation update and changes `LockstepNavGrid.version`; walking agents then check the
+  rest of their path and plan again when it is blocked. Partial paths are planned again on every change, since the
+  destination may have opened up.
+- **Walking.** Agents walk at `speed`, keep it through corners, turn to face where they walk (`angularSpeed` radians per
+  second; zero turns at once), stop `stoppingDistance` before the end of the path and become `Arrived`. Y follows the
+  destination's height. Without a grid agents walk straight to the destination.
+- **Determinism.** Integer and `FixedPoint` math only, a heap with a strict total order, and paths that depend only on
+  the grid and their own agent, so planning in parallel gives the same result on any number of threads. Cells count
+  obstacles, so the order obstacles are stamped in does not matter. Burst and Mono find bit-identical paths.
+
+### Cost
+
+A search visits each cell at most once and stops at the destination. Its cost grows with the area between start and
+destination; an unreachable destination makes it visit the whole reachable area. Paths are planned in a parallel job
+with one scratch buffer per chunk, and walking agents only re-check their remaining segments when the grid changes.
+Pick the cell size from the narrowest gap units must pass: about the agent radius is a good start.
 
 ## Sessions
 
@@ -1228,10 +1305,11 @@ A frame is a record count followed by one record per player with news: the slot,
 | `Runtime/Simulation/Components` | The simulation components and singletons (`LockstepTime`, `LockstepPlayer`, `LockstepCommand`...) |
 | `Runtime/Transforms` | `LockstepTransform`, `LockstepTransformPrevious`, transform history |
 | `Runtime/Client` | Local input, `LockstepWorlds`, offline mode, prefab registry copy, `LockstepViewSystem` |
+| `Runtime/Navigation` | `Pragma.Lockstep.Navigation`: the grid, obstacles, agents, `LockstepPathfinder`, the navigation systems |
 | `Runtime/Views` | `Pragma.Lockstep.Views`: GameObject views (`EntityView`, view parts, `EntityViewManagerSystem`, update systems, catalogs, the pool) |
 | `Runtime/Netcode` | `Pragma.Lockstep.Netcode`: the RPC, server and client systems, `LockstepNetcode` |
 | `Runtime/Netcode/Components` | `LockstepServerConfig`, `LockstepClientConfig`, `LockstepServerStatus`, start and end requests |
-| `Runtime/Authoring` | `Pragma.Lockstep.Authoring`: bakers (transforms, prefab registry, scene entities, entity ids, view catalogs and keys) |
+| `Runtime/Authoring` | `Pragma.Lockstep.Authoring`: bakers (transforms, prefab registry, scene entities, entity ids, view catalogs and keys, navigation grid, obstacles and agents) |
 | `Editor` | `Pragma.Lockstep.Editor`: fixed-point drawers, the debug window |
 | `Skills~` | Claude Code skills (Unity skips folders whose name ends with `~`) |
 
@@ -1242,7 +1320,7 @@ how to work with it:
 
 | Skill | Use it for |
 |---|---|
-| `pragma-lockstep-gameplay` | Writing simulation code: systems, input, commands, players, `FixedPoint` math, spawning; presentation and GameObject views |
+| `pragma-lockstep-gameplay` | Writing simulation code: systems, input, commands, players, `FixedPoint` math, spawning, navigation; presentation and GameObject views |
 | `pragma-lockstep-sessions` | Offline, host, join, dedicated servers, settings, match flow, custom transports, replays |
 | `pragma-lockstep-desync` | Finding and preventing desyncs, determinism tests |
 
@@ -1277,6 +1355,9 @@ Copy-Item -Recurse -Force (Resolve-Path "Library/PackageCache/com.pragma.dotsloc
 | A map object is missing from the simulation | It has no `LockstepSceneEntityAuthoring`, it sits in another subscene than the registry, or the session started without `waitForPrefabRegistry` |
 | A GameObject view misses a component | No `EntityViewUpdateSystem<T>` subclass for that type, or the part sits under a nested `EntityView` |
 | A GameObject view does not move | No `TransformComponentView` on it, or the entity has no `LockstepTransform`; without `LockstepTransformPrevious` it moves in steps |
+| Agents do not move | The agent has no `LockstepTransform` or `LockstepNavWaypoint` buffer, its speed is zero, or the destination was set after `LockstepNavSystemGroup` updated (it starts on the next tick) |
+| Agents walk through an obstacle | The obstacle is not in the simulation world (a static map object needs `LockstepSceneEntityAuthoring`), lies outside the grid, or is thinner than a cell with an agent radius of zero |
+| Agents stop short of the destination | `isPathPartial`: the destination is blocked or walled in, and the path ends at the closest reachable point |
 | Connections drop when the window loses focus | `Application.runInBackground` is off |
 | A "Burst error" in the console | Burst falls back to managed code silently in some cases; fix the reported construct (for example a managed array in a Burst method) |
 | Desync reports | See [Desync detection and debugging](#desync-detection-and-debugging) |
@@ -1288,6 +1369,8 @@ Copy-Item -Recurse -Force (Resolve-Path "Library/PackageCache/com.pragma.dotsloc
 - **Late join from a snapshot.** Joining re-simulates the match from tick 0, which grows with the match length.
 - **Deterministic physics.** Use `FixedPoint` math for collisions (the sample does). Unity Physics is not deterministic
   across platforms.
+- **Local avoidance and richer navigation.** Agents follow their own paths and may overlap. One grid per world with one
+  agent radius, flat (no heights or cell costs), and no flow fields for large groups.
 
 ## License
 

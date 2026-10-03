@@ -87,7 +87,7 @@ Related skills: `pragma-lockstep-gameplay` (how to write simulation code correct
 | `UnityEngine.Random`, `System.Random`, `Unity.Mathematics.Random` seeded locally | Different seeds and sequences | `LockstepRandom` (by `ref`) or an `FixedRandom` in a component |
 | `if (slot == localSlot)`, camera, screen, platform, quality checks | Different on every machine | Move to the presentation |
 | Presentation or UI writing into the simulation world | Only one client changes | Send a command |
-| Reading other worlds, GameObjects, Unity Physics, NavMesh, Animator from the simulation | Local, float-based state | Only simulation data and `FixedPoint` code |
+| Reading other worlds, GameObjects, Unity Physics, NavMesh, Animator from the simulation | Local, float-based state | Only simulation data and `FixedPoint` code; `Pragma.Lockstep.Navigation` for paths |
 | Runtime-loaded config (ScriptableObject edited locally, JSON, PlayerPrefs) | Different values per machine | Bake it, or send it as start data |
 | `#if UNITY_EDITOR` / platform defines in simulation code | Different code per platform | Same code everywhere |
 | `float.Parse`, `ToString` round trips | Culture and float formatting | `FixedPoint.Parse` |

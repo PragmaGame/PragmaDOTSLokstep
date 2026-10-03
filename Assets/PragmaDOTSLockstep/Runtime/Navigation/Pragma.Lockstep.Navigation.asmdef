@@ -1,22 +1,17 @@
 {
-    "name": "Pragma.Lockstep.Authoring",
-    "rootNamespace": "Pragma.Lockstep.Authoring",
+    "name": "Pragma.Lockstep.Navigation",
+    "rootNamespace": "Pragma.Lockstep.Navigation",
     "references": [
         "Pragma.Lockstep",
         "Pragma.Lockstep.Mathematics",
-        "Pragma.Lockstep.Navigation",
-        "Pragma.Lockstep.Views",
         "Unity.Entities",
-        "Unity.Entities.Hybrid",
         "Unity.Collections",
-        "Unity.Mathematics",
-        "Unity.Transforms",
-        "Unity.NetCode",
-        "Unity.NetCode.Authoring.Hybrid"
+        "Unity.Burst",
+        "Unity.Mathematics"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
-    "allowUnsafeCode": false,
+    "allowUnsafeCode": true,
     "overrideReferences": false,
     "precompiledReferences": [],
     "autoReferenced": true,

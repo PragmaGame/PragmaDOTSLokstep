@@ -1,6 +1,6 @@
 ---
 name: pragma-lockstep-gameplay
-description: Write deterministic gameplay for Pragma DOTS Lockstep (package com.pragma.dotslockstep, namespace Pragma.Lockstep) - simulation systems in LockstepSimulationSystemGroup, per-tick input structs and commands, player join/leave, spawning entities and registry prefabs, LockstepEntityId references, fixed-point math (FixedPoint, FixedVector2, FixedVector3, FixedQuaternion, FixedMath, FixedRandom) and presenting the simulation with interpolation and GameObject views (EntityView, EntityViewKey, EntityComponentView, EntityViewUpdateSystem, view catalogs and pools, ported from ECV). Use it whenever you add or change anything that runs inside a lockstep simulation world or reads it for rendering - units, movement, combat, abilities, economy, AI, timers, randomness, input handling, views, UI - even if the user never says "deterministic" or "lockstep".
+description: Write deterministic gameplay for Pragma DOTS Lockstep (package com.pragma.dotslockstep, namespace Pragma.Lockstep) - simulation systems in LockstepSimulationSystemGroup, per-tick input structs and commands, player join/leave, spawning entities and registry prefabs, LockstepEntityId references, navigation and pathfinding around obstacles (LockstepNavGrid, LockstepNavObstacle, LockstepNavAgent, LockstepPathfinder), fixed-point math (FixedPoint, FixedVector2, FixedVector3, FixedQuaternion, FixedMath, FixedRandom) and presenting the simulation with interpolation and GameObject views (EntityView, EntityViewKey, EntityComponentView, EntityViewUpdateSystem, view catalogs and pools, ported from ECV). Use it whenever you add or change anything that runs inside a lockstep simulation world or reads it for rendering - units, movement, combat, abilities, economy, AI, timers, randomness, input handling, views, UI - even if the user never says "deterministic" or "lockstep".
 ---
 
 # Gameplay with Pragma DOTS Lockstep
@@ -217,7 +217,8 @@ foreach (var (player, input, commands) in SystemAPI.Query<RefRO<LockstepPlayer>,
 | `UnityEngine.Random`, `System.Random` | `LockstepRandom.value`, an `FixedRandom` in a component |
 | `Entity` in commands, sort keys, seeds, hash keys | `LockstepEntityId.value` |
 | `LocalTransform` for gameplay | `LockstepTransform` |
-| Unity Physics / NavMesh queries for gameplay | Own `FixedPoint` collision and grid code |
+| Unity Physics queries for gameplay | Own `FixedPoint` collision code |
+| NavMesh, `NavMeshAgent` | `LockstepNavAgent` on the `LockstepNavGrid` (`Pragma.Lockstep.Navigation`) |
 | `static` counters, system fields with state | Singleton components on ordinary entities |
 | Iterating a hash map | Iterate a query or a buffer sorted by a deterministic key |
 
@@ -235,6 +236,23 @@ foreach (var (player, input, commands) in SystemAPI.Query<RefRO<LockstepPlayer>,
 - **One-shot effects for the presentation:** append `{ tick, kind, position }` to a singleton buffer in the
   simulation and trim old entries; the presentation plays entries newer than the last tick it handled (it may skip
   ticks when it catches up).
+
+## Navigation
+
+Units that walk around obstacles use `Pragma.Lockstep.Navigation` (assembly reference `Pragma.Lockstep.Navigation`):
+
+- **Grid.** One `LockstepNavGrid` per simulation world, baked with `LockstepNavGridAuthoring` into the map subscene
+  (a scene entity): size, cell size, agent radius. Its `LockstepNavCell` buffer counts the obstacles over each cell.
+- **Obstacles.** `LockstepNavObstacleAuthoring`: on a prefab next to `LockstepTransformAuthoring` the rectangle follows
+  the entity (buildings); on a static map object next to `LockstepSceneEntityAuthoring` the pose is baked. Cells are
+  blocked while the entity exists; destroying it releases them on the next tick. Keep renderers off scene obstacles.
+- **Agents.** `LockstepNavAgentAuthoring` (speed, angular speed in degrees, stopping distance). Gameplay calls
+  `agent.ValueRW.SetDestination(target)` from a system with `[UpdateBefore(typeof(LockstepNavSystemGroup))]` and reads
+  `status` (`Requested`, `Moving`, `Arrived`) and `isPathPartial`. Never write `LockstepTransform` of a walking agent
+  yourself; call `Stop()` first.
+- **Queries.** `LockstepNavigation.IsWalkable`, `HasLineOfSight`, `TryFindNearestWalkable` for placement checks and AI;
+  `LockstepPathfinder` (scratch memory, one per thread) for paths outside agents.
+- Agents do not avoid each other. See `references/simulation-api.md` and the README section *Navigation*.
 
 ## Burst and jobs
 

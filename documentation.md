@@ -216,8 +216,9 @@ component field.
 milliseconds. The input clock here is steered by how early the server actually receives each client's input, which
 also accounts for server load and asymmetric routes.
 
-**Physics, navigation, prediction culling, the Photon server plugin** (Quantum). Out of scope: the request was a
-lockstep layer for Entities and Netcode for Entities. Gameplay collisions are written with `FixedPoint` (the sample does).
+**Physics, prediction culling, the Photon server plugin** (Quantum). Out of scope: the request was a lockstep layer for
+Entities and Netcode for Entities. Gameplay collisions are written with `FixedPoint` (the sample does). Navigation
+came later, for DawnOfWar, as a grid of its own rather than Quantum's navmesh (decision 11).
 
 ## Decisions specific to Unity DOTS
 
@@ -260,11 +261,24 @@ These came up while building on Entities; neither reference package deals with t
     from each object's `GlobalObjectId`, because the query order of the presentation world follows the order its
     subscene sections loaded in, which may differ between clients.
 
+11. **Navigation on a grid.** RTS units need paths around buildings, and NavMesh is float-based and built per
+    platform. `Pragma.Lockstep.Navigation` keeps a walkability grid in the simulation world as plain state: a buffer
+    of obstacle counts, so obstacles stamp and release cells in any order with the same result, and the checksum
+    covers it. Obstacles are entities; the rectangle each one stamped is kept in a cleanup component, which is how a
+    destroyed building releases its cells. The search is A* with integer costs and a heap with a strict total order;
+    line of sight for string pulling compares cross products of raw fixed-point values, so it is exact, and a segment
+    through a cell corner counts both cells beside it. Paths are planned in a parallel job: each depends only on the
+    grid and its own agent, so the thread count cannot change a result. Walking agents re-check their remaining
+    segments when the grid version changes and plan again only when they are blocked. A grid was chosen over a
+    fixed-point navmesh because it is simple to keep exact, cheap to change at run time (buildings) and easy to hash;
+    a navmesh with a funnel algorithm would give smoother paths on large open maps.
+
 ## Limitations and future work
 
 - **Prediction and rollback**: a predicted copy of the simulation world, restored from the confirmed one and
   re-simulated when frames arrive.
 - **Snapshot late join**: serialize the confirmed world for joiners of long matches.
 - **Deterministic physics** on `FixedPoint`.
+- **Navigation**: local avoidance between agents, flow fields for large groups, cell costs, several agent sizes.
 - **Input compression** for large input structs.
 - **Diff tooling**: a window that compares per-component hashes and entity dumps of two clients side by side.

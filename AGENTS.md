@@ -21,6 +21,7 @@ The package is unreleased: backward compatibility is not required yet, prefer cl
 | `Assets/PragmaDOTSLockstep/Runtime/Simulation/Components` | Simulation components and singletons |
 | `Assets/PragmaDOTSLockstep/Runtime/Transforms` | `LockstepTransform`, history and interpolation |
 | `Assets/PragmaDOTSLockstep/Runtime/Client` | Local input, `LockstepWorlds`, offline mode, prefab registry copy, `LockstepViewSystem` |
+| `Assets/PragmaDOTSLockstep/Runtime/Navigation` | `Pragma.Lockstep.Navigation`: grid, obstacles, agents, `LockstepPathfinder` (A* and string pulling in integer math) and the navigation systems |
 | `Assets/PragmaDOTSLockstep/Runtime/Views` | `Pragma.Lockstep.Views`: GameObject views ported from ECV (DawnOfWar): `EntityView`, view parts, `EntityViewKey`, `EntityViewManagerSystem`, update systems, catalogs, `IEntityViewPool` |
 | `Assets/PragmaDOTSLockstep/Runtime/Netcode` | `Pragma.Lockstep.Netcode`: the RPC and the Netcode server and client systems |
 | `Assets/PragmaDOTSLockstep/Runtime/Netcode/Components` | Server/client config, status and start/end request components |
@@ -123,7 +124,7 @@ to a drive letter with `subst`.
 ## Tests
 
 - `Assets/Tests/Editor` is the EditMode suite: math accuracy and Burst equality, golden results, serialization,
-  checksums, simulation rules, sessions (latency, jitter, late join, disconnects, desync attribution, replays),
+  checksums, simulation rules, navigation (pathfinder, Burst equality, obstacles, agents, a session), sessions (latency, jitter, late join, disconnects, desync attribution, replays),
   presentation, GameObject views, offline mode and a real Netcode server with two clients.
 - The suite reaches internals through `InternalsVisibleTo` in `Runtime/AssemblyInfo.cs`.
 - `Assets/Tests/Editor/AssemblyInfo.cs` has `[assembly: DisableAutoCreation]`: test systems enter simulations only
