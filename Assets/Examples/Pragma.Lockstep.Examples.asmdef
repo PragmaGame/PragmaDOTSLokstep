@@ -1,0 +1,32 @@
+{
+    "name": "Pragma.Lockstep.Examples",
+    "rootNamespace": "Pragma.Lockstep.Examples",
+    "references": [
+        "Pragma.Lockstep",
+        "Pragma.Lockstep.Mathematics",
+        "Pragma.Lockstep.Netcode",
+        "Unity.Entities",
+        "Unity.Collections",
+        "Unity.Mathematics",
+        "Unity.Burst",
+        "Unity.Transforms",
+        "Unity.NetCode",
+        "Unity.Networking.Transport",
+        "Unity.InputSystem"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.inputsystem",
+            "expression": "1.0.0",
+            "define": "LOCKSTEP_EXAMPLES_INPUT_SYSTEM"
+        }
+    ],
+    "noEngineReferences": false
+}

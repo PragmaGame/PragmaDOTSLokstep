@@ -1,0 +1,22 @@
+{
+    "name": "Pragma.Lockstep.Editor",
+    "rootNamespace": "Pragma.Lockstep.Editor",
+    "references": [
+        "Pragma.Lockstep",
+        "Pragma.Lockstep.Mathematics",
+        "Unity.Entities",
+        "Unity.Collections",
+        "Unity.Mathematics"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -1,0 +1,30 @@
+{
+  "name": "com.pragma.dotslockstep",
+  "displayName": "Pragma DOTS Lockstep",
+  "version": "1.0.0",
+  "unity": "6000.6",
+  "description": "Deterministic lockstep for Unity DOTS on top of Netcode for Entities: an isolated simulation world, fixed-point math, a server that orders inputs, adaptive input timing, desync detection with state hashes, late join, replays and an offline mode that runs the same code path.",
+  "keywords": [
+    "lockstep",
+    "deterministic",
+    "dots",
+    "ecs",
+    "entities",
+    "netcode",
+    "fixed-point",
+    "multiplayer"
+  ],
+  "author": {
+    "name": "Pragma",
+    "email": "pragmagame@gmail.com",
+    "url": "https://github.com/PragmaGame"
+  },
+  "documentationUrl": "https://github.com/PragmaGame/PragmaDOTSLokstep/blob/master/Assets/PragmaDOTSLockstep/README.md",
+  "changelogUrl": "https://github.com/PragmaGame/PragmaDOTSLokstep/blob/master/Assets/PragmaDOTSLockstep/CHANGELOG.md",
+  "licensesUrl": "https://github.com/PragmaGame/PragmaDOTSLokstep/blob/master/Assets/PragmaDOTSLockstep/LICENSE.md",
+  "license": "MIT",
+  "dependencies": {
+    "com.unity.entities": "6.6.0",
+    "com.unity.netcode": "6.6.0"
+  }
+}

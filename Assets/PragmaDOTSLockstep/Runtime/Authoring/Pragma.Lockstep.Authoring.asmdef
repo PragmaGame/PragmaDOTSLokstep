@@ -1,0 +1,22 @@
+{
+    "name": "Pragma.Lockstep.Authoring",
+    "rootNamespace": "Pragma.Lockstep.Authoring",
+    "references": [
+        "Pragma.Lockstep",
+        "Pragma.Lockstep.Mathematics",
+        "Unity.Entities",
+        "Unity.Entities.Hybrid",
+        "Unity.Collections",
+        "Unity.Mathematics",
+        "Unity.Transforms"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

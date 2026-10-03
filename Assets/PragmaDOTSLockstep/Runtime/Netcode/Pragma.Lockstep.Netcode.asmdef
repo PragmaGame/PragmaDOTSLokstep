@@ -1,0 +1,23 @@
+{
+    "name": "Pragma.Lockstep.Netcode",
+    "rootNamespace": "Pragma.Lockstep.Netcode",
+    "references": [
+        "Pragma.Lockstep",
+        "Pragma.Lockstep.Mathematics",
+        "Unity.Entities",
+        "Unity.Collections",
+        "Unity.Burst",
+        "Unity.Mathematics",
+        "Unity.NetCode",
+        "Unity.Networking.Transport"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
