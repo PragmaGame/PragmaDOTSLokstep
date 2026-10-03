@@ -1,6 +1,6 @@
 ---
 name: pragma-lockstep-gameplay
-description: Write deterministic gameplay for Pragma DOTS Lockstep (package com.pragma.dotslockstep, namespace Pragma.Lockstep) - simulation systems in LockstepSimulationSystemGroup, per-tick input structs and commands, player join/leave, spawning entities and registry prefabs, LockstepEntityId references, fixed-point math (FixedPoint, FixedVector2, FixedVector3, FixedQuaternion, FixedMath, FixedRandom) and presenting the simulation with interpolation. Use it whenever you add or change anything that runs inside a lockstep simulation world or reads it for rendering - units, movement, combat, abilities, economy, AI, timers, randomness, input handling, views, UI - even if the user never says "deterministic" or "lockstep".
+description: Write deterministic gameplay for Pragma DOTS Lockstep (package com.pragma.dotslockstep, namespace Pragma.Lockstep) - simulation systems in LockstepSimulationSystemGroup, per-tick input structs and commands, player join/leave, spawning entities and registry prefabs, LockstepEntityId references, fixed-point math (FixedPoint, FixedVector2, FixedVector3, FixedQuaternion, FixedMath, FixedRandom) and presenting the simulation with interpolation and GameObject views (EntityView, EntityViewKey, EntityComponentView, EntityViewUpdateSystem, view catalogs and pools, ported from ECV). Use it whenever you add or change anything that runs inside a lockstep simulation world or reads it for rendering - units, movement, combat, abilities, economy, AI, timers, randomness, input handling, views, UI - even if the user never says "deterministic" or "lockstep".
 ---
 
 # Gameplay with Pragma DOTS Lockstep
@@ -14,6 +14,7 @@ Deeper reference:
 
 - `references/simulation-api.md` - every simulation-side type, singleton and helper.
 - `references/fixed-point.md` - `FixedPoint` semantics, `FixedMath`, vectors, quaternions, `FixedRandom`.
+- `references/views.md` - GameObject views: keys, parts, update systems, catalogs, the manager, pools.
 - The package README: `Assets/PragmaDOTSLockstep/README.md` in the package repository, or
   `Library/PackageCache/com.pragma.dotslockstep@*/README.md` in a project that installed it.
 - The `pragma-lockstep-desync` skill when something already diverged; `pragma-lockstep-sessions` for networking.
@@ -252,8 +253,17 @@ if (LockstepWorlds.TryGetClient(presentationWorld, out var client) && client.Sim
 ```
 
 - Entities need `LockstepTransformPrevious` to interpolate (add it, or tick *Interpolate* on `LockstepTransformAuthoring`).
-- `LockstepViewSystem` spawns a rendered copy of the registry prefab for every simulation entity with
+- GameObject views (`Pragma.Lockstep.Views`, ported from ECV) are the usual way to show units: give the entity an
+  `EntityViewKey` where it is created, make a prefab with `EntityView`, `TransformComponentView` and one part per
+  component type (`EntityComponentViewUnmanaged<T>` reacts to changes only), add
+  `public partial class XViewUpdateSystem : EntityViewUpdateSystem<X> { }` per type, and bind keys to prefabs in an
+  `EntityViewConfig` (baked with `EntityViewConfigAuthoring`, or `EntityViewConfigProvider` when worlds are created on
+  demand). Views come from a pool each project can replace (`EntityViewManagerSystem.PoolFactory`). See
+  `references/views.md`.
+- `LockstepViewSystem` spawns an Entities Graphics copy of the registry prefab for every simulation entity with
   `LockstepPrefabId` (all instances of registry prefabs) and moves it every frame.
+- Presentation code never writes to the simulation world, not even a tag. Local state (selection, hover, "is mine":
+  `data.slot == View.Client.LocalSlot`) stays in the presentation; changes go through commands.
 - Convert for display only: `(float)value`, `(float3)position`, `(quaternion)rotation`, `transform.ToLocalTransform()`.
   Never feed a converted value back into the simulation.
 
@@ -265,4 +275,5 @@ if (LockstepWorlds.TryGetClient(presentationWorld, out var client) && client.Sim
 - [ ] No `Entity` value used as data; cross-client references use `LockstepEntityId`.
 - [ ] No structural change inside a `SystemAPI.Query` loop; parallel command buffers have sort keys.
 - [ ] Input changes keep the struct size in sync with `InputSize` (`UnsafeUtility.SizeOf<T>()`).
+- [ ] Presentation code (views, parts, UI) only reads the simulation world.
 - [ ] The code compiles without Burst errors, and a two-client test or offline run shows no desync.

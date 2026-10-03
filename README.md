@@ -17,6 +17,8 @@ server never simulates, and the bandwidth depends on the number of players, not 
 - A server that orders input and never stalls, adaptive input timing, a jitter-aware playout buffer.
 - Desync detection by majority vote with a per-component breakdown, replays, late join, offline mode.
 - Netcode for Entities integration (host, dedicated server, thin clients) and a transport-agnostic core.
+- GameObject views adapted from ECV: pooled view prefabs per entity key, per-component parts fed when their component
+  changes, interpolated transforms, a pool each project can replace.
 
 ## Installation
 
@@ -35,8 +37,9 @@ Only `Assets/PragmaDOTSLockstep` ships; everything else is the development proje
 |---|---|
 | `Assets/PragmaDOTSLockstep` | The package: runtime, Netcode integration, authoring, editor tools, Claude Code skills (`Skills~`) |
 | `Assets/Examples` | *Lockstep Arena*, a playable sample: offline, host and join ([README](Assets/Examples/README.md)) |
-| `Assets/Tests/Editor` | EditMode tests: math, serialization, checksums, simulation, sessions, presentation, Netcode integration |
-| [`documentation.md`](documentation.md) | Design notes: architecture, decisions, what was taken from ME.BECS and Photon Quantum and why |
+| `Assets/Tests/Editor` | EditMode tests: math, serialization, checksums, simulation, sessions, presentation, GameObject views, Netcode integration |
+| `Assets/Tests/Runtime` | MonoBehaviours the tests put on GameObjects (Unity cannot add components from Editor assemblies) |
+| [`documentation.md`](documentation.md) | Design notes: architecture, decisions, what was taken from ME.BECS, Photon Quantum and ECV, and why |
 | [`mebecs_research.md`](mebecs_research.md) | How ME.BECS implements determinism and networking |
 | [`photon_research.md`](photon_research.md) | How Photon Quantum implements determinism and prediction/rollback |
 | [`AGENTS.md`](AGENTS.md) | Conventions and workflow for contributors and AI agents |

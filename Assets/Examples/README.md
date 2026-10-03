@@ -22,11 +22,19 @@ state, the round-trip time, the jitter, and the state hashes.
 
 | File | Shows |
 |---|---|
-| `Scripts/Simulation/ArenaComponents.cs` | The input struct (quantized bytes), a command, components and tuning written with `FixedPoint` |
-| `Scripts/Simulation/ArenaSystems.cs` | Deterministic systems: avatars spawned when players join and removed when they leave, movement with button edges, shots, wall bounces, collisions, all in `FixedPoint` |
+| `Scripts/Simulation/ArenaInput.cs`, `ArenaChangeColorCommand.cs` | The input struct (quantized bytes) and a command |
+| `Scripts/Simulation/ArenaAvatar.cs`, `ArenaProjectile.cs`, `ArenaRules.cs`, `ArenaViewKeys.cs` | Components, tuning written with `FixedPoint`, the keys of the views |
+| `Scripts/Simulation/Arena*System.cs` | Deterministic systems, all in `FixedPoint`: avatars spawned when players join and removed when they leave (`ArenaPlayerLifecycleSystem`), input with button edges, shots and commands (`ArenaControlSystem`), movement, wall bounces and avatar collisions (`ArenaMovementSystem`), projectiles that fly, knock avatars back and score (`ArenaProjectileSystem`) |
 | `Scripts/Client/ArenaInputSystem.cs` | Reads devices with the Input System and writes `LockstepLocalInput`; queues a command |
-| `Scripts/ArenaPresentation.cs` | GameObject views reading the simulation world, interpolated between ticks |
+| `Views/` | GameObject views: the prefabs `AvatarView` and `ProjectileView`, and `ArenaViewConfig`, the catalog that binds them to the keys |
+| `Scripts/Views/ArenaAvatarView.cs`, `ArenaAvatarViewUpdateSystem.cs` | A view part: the avatar in its player's color, the local player's avatar a little bigger |
+| `Scripts/ArenaPresentation.cs`, `ArenaColors.cs` | The arena and the scoreboard, read straight from the simulation world |
 | `Scripts/ArenaBootstrap.cs` | Offline, host and join flows with `LockstepOfflineConfig` and `LockstepNetcode` |
+
+The avatars and projectiles get an `EntityViewKey` when the simulation creates them; the package spawns the view
+prefabs from its pool, moves them with interpolation between ticks and returns them when the entities go away. The
+scene registers the catalog with an `EntityViewConfigProvider` rather than baking it into a subscene, because the
+networked worlds are created on demand, after the scene has loaded.
 
 The scene has an `OverrideAutomaticNetcodeBootstrap` set to *Disable*, so Netcode creates only a local world at
 start. The networked worlds are created on demand by the bootstrap. Hosting turns on `Application.runInBackground`,

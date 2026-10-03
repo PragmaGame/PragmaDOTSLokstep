@@ -137,6 +137,7 @@ loaded.
 | `LockstepSimulation.World`, `.Tick` (simulated ticks = next tick), `.Config`, `.ComputeChecksum()` | Read only |
 | `LockstepClient.InterpolationAlpha` | Blend factor in `[0, 1]` |
 | `LockstepViewSystem` (presentation worlds) | Mirrors entities with `LockstepPrefabId` as rendered registry prefabs; `LockstepView { Entity simulationEntity }`, `TryGetView`, `ViewCount` |
+| `EntityViewManager.TryGet(World, out manager)` (`Pragma.Lockstep.Views`) | GameObject views of the entities with an `EntityViewKey`: `TryGetView`, `Attach`, `Detach`, `ForceUpdate`; see `views.md` |
 
 ## Authoring components
 
@@ -146,6 +147,8 @@ Namespace `Pragma.Lockstep.Authoring`:
   adds `LockstepTransformPrevious`.
 - `LockstepPrefabRegistryAuthoring` - the prefab list.
 - `LockstepEntityIdAuthoring` - adds `LockstepEntityId`.
+- `EntityViewKeyAuthoring` - adds `EntityViewKey`, so instances get the GameObject view bound to the key.
+- `EntityViewConfigAuthoring` - bakes an `EntityViewConfig` catalog into the presentation world (not for servers).
 
 For your own data, write regular bakers and convert floats to `FixedPoint` in the baker (`(FixedPoint)authoring.speed`): baking
 happens once, so every client loads the same raw values.

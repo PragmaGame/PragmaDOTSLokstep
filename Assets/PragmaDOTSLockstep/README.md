@@ -71,8 +71,10 @@ It is a poor fit for:
 - **Netcode for Entities integration.** Connections, handshake and transport come from Netcode; all lockstep traffic
   is one hand-serialized RPC. Works with a listen server (host) or a dedicated server; thin clients send input
   without simulating.
-- **Presentation helpers.** Interpolated `LockstepTransform`, `LockstepViewSystem` that mirrors simulation entities into
-  rendered entities from a baked prefab registry, and direct read access to the simulation world for GameObject views.
+- **Presentation.** GameObject views adapted from ECV (Entity Component View): a pooled prefab per entity key, one
+  view part per component type fed when that component changes, transforms interpolated between ticks, and a pool each
+  project can replace (com.pragma.pool, Addressables...). `LockstepViewSystem` mirrors entities into Entities Graphics
+  copies of the baked registry prefabs, and anything else can read the simulation world directly.
 - **Tooling.** Fixed-point inspectors, the *Window > Pragma > Lockstep Sessions* debug window and Claude Code skills.
 
 ## Requirements
@@ -104,8 +106,9 @@ Reference the assemblies you use from your assembly definitions:
 |---|---|---|
 | `Pragma.Lockstep.Mathematics` | `FixedPoint`, vectors, quaternion, `FixedMath`, `FixedRandom`; no Entities dependency | simulation and presentation code |
 | `Pragma.Lockstep` | Protocol, simulation world, components, checksums, replays, offline mode, presentation helpers | simulation and presentation code |
+| `Pragma.Lockstep.Views` | GameObject views: `EntityView`, view parts, `EntityViewKey`, the view manager, catalogs, the pool abstraction | presentation code, and simulation code that sets an `EntityViewKey` |
 | `Pragma.Lockstep.Netcode` | Netcode for Entities RPC and the server and client systems | bootstrap code |
-| `Pragma.Lockstep.Authoring` | Bakers for transforms, the prefab registry and entity ids | authoring code, if any |
+| `Pragma.Lockstep.Authoring` | Bakers for transforms, the prefab registry, entity ids, view catalogs and view keys | authoring code, if any |
 
 ## How it works
 
@@ -135,7 +138,8 @@ Reference the assemblies you use from your assembly definitions:
  LockstepNetcodeClientSystem                             LockstepBeginSimulationEntityCommandBufferSystem
    LockstepClient: sends input, receives frames,         your gameplay systems
    steps the simulation world  ───────────────────►     LockstepEndSimulationEntityCommandBufferSystem
- LockstepViewSystem, your presentation                   LockstepEntityIdSystem
+ LockstepViewSystem, EntityViewManagerSystem,            LockstepEntityIdSystem
+ GameObject views, the rest of your presentation
    read the simulation world  ◄── read only ───
 ```
 
@@ -316,7 +320,8 @@ if (LockstepWorlds.TryGetClient(presentationWorld, out var client) && client.Sim
 }
 ```
 
-Or let `LockstepViewSystem` spawn and move rendered entities for you; see [Presentation](#presentation).
+Or let the package spawn and move views for you: GameObject prefabs bound to an `EntityViewKey`
+([GameObject views](#gameobject-views)), or Entities Graphics copies of the registry prefabs (`LockstepViewSystem`).
 
 ## Writing the simulation
 
@@ -767,7 +772,131 @@ start-of-tick transform, and `LockstepTransformExtensions.Interpolate(current, p
 returns the blended `LocalTransform`. It returns the current value when the previous transform was not captured on the
 latest tick (a newly created entity), so new entities never slide in from the origin.
 
-### LockstepViewSystem
+### GameObject views
+
+`Pragma.Lockstep.Views` adapts ECV (Entity Component View) to lockstep: GameObject prefabs show simulation entities,
+with one MonoBehaviour *part* per component type that receives the component when it changes. Use it for what Entities
+Graphics does not draw well: animators, VFX, health bars, selection rings, world-space UI.
+
+1. **Give entities a key.** `EntityViewKey` (a `FixedString32Bytes`, 1 to 29 bytes of UTF-8) names the view that shows
+   an entity. It is simulation data like any other: set it where the entity is created, or bake it on a registry prefab
+   with `EntityViewKeyAuthoring`. Changing it swaps the view.
+
+   ```csharp
+   var knight = state.EntityManager.CreateEntity(_knightArchetype); // the archetype includes EntityViewKey
+   state.EntityManager.SetComponentData(knight, new EntityViewKey("Knight"));
+   ```
+
+2. **Make the view prefab.** Put `EntityView` on the root. Add `TransformComponentView` where the view should follow
+   the interpolated `LockstepTransform`, and one part per component type to show:
+
+   ```csharp
+   public sealed class HealthBarView : EntityComponentViewUnmanaged<Health>
+   {
+       [SerializeField] private Transform _fill;
+
+       protected override void OnUpdateData(Health data)
+       {
+           _fill.localScale = new Vector3((float)data.current / (float)data.max, 1f, 1f);
+       }
+   }
+   ```
+
+   `EntityComponentView<T>.UpdateData` runs whenever the chunk holding the entity's `T` was written, so it may repeat
+   a value; `EntityComponentViewUnmanaged<T>` compares the bytes, calls `OnUpdateData` only on a change and forgets the
+   cached value when a pooled view is bound to another entity. Several parts may show the same type. A part reaches its
+   root through `View`: `View.Entity`, `View.Client.LocalSlot`.
+
+3. **Push the component type.** One empty system per type, in any assembly (its presentation filter keeps it out of
+   simulation worlds):
+
+   ```csharp
+   public partial class HealthViewUpdateSystem : EntityViewUpdateSystem<Health>
+   {
+   }
+   ```
+
+   Override `ConfigureQuery` to narrow the simulation query. Transforms need no system of yours:
+   `TransformViewUpdateSystem` interpolates them every frame, and a view shows the current transform until one tick
+   after it was bound, so it never slides in from where its entity was created.
+
+4. **List the views in a catalog.** Create an `EntityViewConfig` (*Create > Pragma > Lockstep > Entity View Config*)
+   and bind each key to a prefab. Bake it with `EntityViewConfigAuthoring` in a subscene loaded by the client (or local)
+   world; dedicated server builds bake nothing. Or register it at runtime with `EntityViewConfigProvider` on a scene
+   object (`EntityViewConfigs.Add` in code): a subscene loads only into the worlds that exist when it is enabled, a
+   runtime catalog reaches presentation worlds created later. Baked catalogs come first; the first binder of a key wins.
+
+`EntityViewManagerSystem` runs early in `PresentationSystemGroup` (`OrderFirst`), before the update systems, and shows
+the session of its world (`LockstepWorlds`). When a tick created, destroyed or re-keyed keyed entities, it compares them
+with its views: new entities get a view from the pool, entities that went away or changed their key give theirs back.
+Views are returned first, so a released instance serves a new entity in the same frame. Then the systems of
+`EntityViewUpdateSystemGroup` push the data: only the chunks whose component (or an enableable component of the query)
+changed since the previous push, judged by the change versions of the simulation world, and every value to the views
+spawned, attached or forced since then, so a view always starts from the current state. Nothing is written to the
+simulation world, not even a cleanup component, so views cannot cause desyncs.
+
+| API | Use |
+|---|---|
+| `EntityViewManager.TryGet(world, out manager)` | The manager of a presentation world |
+| `manager.TryGetView(entity, out view)`, `manager.Views` | Spawned views by simulation entity |
+| `manager.Attach(entity, view)`, `manager.Detach(view)` | Show an entity on a view you own, such as a HUD panel; it gets the same data and is never pooled |
+| `manager.ForceUpdate(entity)` | Push every value of the entity again at the next update |
+| `view.Entity`, `view.Client`, `view.IsBound`, `view.IsAttached` | What a view shows |
+| `view.IsAutoUpdateEnabled` | Pause the pushes, transform included; turning it back on catches up |
+| `view.GetComponentView<T>()`, `view.SetComponentViewEnable<T>(bool)`, `view.UpdateData(data)` | Reach or drive the parts by hand |
+| `view.RefreshComponentViews()` | Collect the parts again after adding some at runtime |
+
+`Entity` values work as keys only in this process and session. To send a command about the unit under the cursor,
+read its `LockstepEntityId` from the simulation world. State that is local to one player (selection, hover, fog of war
+visibility) belongs to the presentation: keep it on the views, never in the simulation.
+
+A pooled instance keeps whatever its parts changed on it: restore that in `BindBreak` (or `Bind`).
+`EntityComponentViewUnmanaged<T>` forgets its cached value on `Bind`, and unbinding turns `IsAutoUpdateEnabled` back on.
+Parts learn values, not absence: when `T` is removed or disabled the entity leaves the query and the part gets no call,
+so show presence with a field (a `bool`) rather than with a tag.
+
+#### The view pool
+
+Views come from an `IEntityViewPool` with two methods, `Spawn(prefab)` and `Release(view)`; the manager binds and
+unbinds the views, the pool only keeps instances. The default `EntityViewPool` keeps released instances inactive under
+one root object per world that survives scene loads (`Prewarm` creates instances ahead). Each project can plug in its
+own pool:
+
+- `EntityViewManagerSystem.PoolFactory = world => ...` creates the pool of every presentation world. Set it in the
+  game's bootstrap; it is cleared when play mode starts. The manager owns what the factory returns: the views go back
+  to it when the world is destroyed, and then it is disposed if it is `IDisposable`.
+- `managerSystem.Pool = pool` replaces the pool of one world. The spawned views go back to the previous pool first;
+  the caller keeps ownership of the new one.
+
+An adapter for com.pragma.pool, whose pools hold `PrefabPoolObject`s (give each view prefab one next to its
+`EntityView`):
+
+```csharp
+public sealed class PragmaPoolEntityViewPool : IEntityViewPool
+{
+    private readonly IPrefabPoolService _pools;
+
+    public PragmaPoolEntityViewPool(IPrefabPoolService pools)
+    {
+        _pools = pools;
+    }
+
+    public EntityView Spawn(EntityView prefab)
+    {
+        return _pools.Spawn(prefab.GetComponent<PrefabPoolObject>()).GetComponent<EntityView>();
+    }
+
+    public void Release(EntityView view)
+    {
+        _pools.Release(view.GetComponent<PrefabPoolObject>());
+    }
+}
+
+// In the bootstrap, before the presentation worlds spawn views:
+EntityViewManagerSystem.PoolFactory = world => new PragmaPoolEntityViewPool(poolService);
+```
+
+### Entity views: LockstepViewSystem
 
 `LockstepViewSystem` runs in presentation worlds and mirrors the simulation into rendered entities:
 
@@ -784,11 +913,11 @@ For every simulation entity with a `LockstepPrefabId`, the view system instantia
 presentation world, adds `LockstepView { simulationEntity }`, writes the interpolated `LocalTransform` every frame and
 destroys the view when the simulation entity goes away. `TryGetView(simulationEntity, out view)` finds a view.
 
-### GameObject views and UI
+### Reading the simulation directly
 
-Reading components directly works for anything: GameObject views, UI, audio. The sample's `ArenaPresentation`
-queries avatars and projectiles in the simulation world and creates, moves and destroys GameObjects for them. Cache the queries per
-simulation world: the world changes when a new session starts.
+Anything else (UI, audio, a minimap) can read components straight from the simulation world. The sample's
+`ArenaPresentation` builds its scoreboard that way. Cache the queries per simulation world: the world changes when a
+new session starts.
 
 ### Effects and sounds
 
@@ -1067,6 +1196,7 @@ A frame is a record count followed by one record per player with news: the slot,
 | Command payload | 122 bytes |
 | Commands per player per tick | 32; extra ones move to the next ticks |
 | Join data / start data | 62 / 126 bytes |
+| View key (`EntityViewKey`) | 29 bytes of UTF-8 |
 | `FixedPoint` | step 1/65536, range ±1.4·10¹⁴, products below about 2·10⁹ |
 
 ## Package layout
@@ -1079,9 +1209,10 @@ A frame is a record count followed by one record per player with news: the slot,
 | `Runtime/Simulation/Components` | The simulation components and singletons (`LockstepTime`, `LockstepPlayer`, `LockstepCommand`...) |
 | `Runtime/Transforms` | `LockstepTransform`, `LockstepTransformPrevious`, transform history |
 | `Runtime/Client` | Local input, `LockstepWorlds`, offline mode, prefab registry copy, `LockstepViewSystem` |
+| `Runtime/Views` | `Pragma.Lockstep.Views`: GameObject views (`EntityView`, view parts, `EntityViewManagerSystem`, update systems, catalogs, the pool) |
 | `Runtime/Netcode` | `Pragma.Lockstep.Netcode`: the RPC, server and client systems, `LockstepNetcode` |
 | `Runtime/Netcode/Components` | `LockstepServerConfig`, `LockstepClientConfig`, `LockstepServerStatus`, start and end requests |
-| `Runtime/Authoring` | `Pragma.Lockstep.Authoring`: bakers |
+| `Runtime/Authoring` | `Pragma.Lockstep.Authoring`: bakers (transforms, prefab registry, entity ids, view catalogs and keys) |
 | `Editor` | `Pragma.Lockstep.Editor`: fixed-point drawers, the debug window |
 | `Skills~` | Claude Code skills (Unity skips folders whose name ends with `~`) |
 
@@ -1092,7 +1223,7 @@ how to work with it:
 
 | Skill | Use it for |
 |---|---|
-| `pragma-lockstep-gameplay` | Writing simulation code: systems, input, commands, players, `FixedPoint` math, spawning, presentation |
+| `pragma-lockstep-gameplay` | Writing simulation code: systems, input, commands, players, `FixedPoint` math, spawning; presentation and GameObject views |
 | `pragma-lockstep-sessions` | Offline, host, join, dedicated servers, settings, match flow, custom transports, replays |
 | `pragma-lockstep-desync` | Finding and preventing desyncs, determinism tests |
 
@@ -1122,7 +1253,10 @@ Copy-Item -Recurse -Force (Resolve-Path "Library/PackageCache/com.pragma.dotsloc
 | "The input set on the client is N bytes but the session input size is M bytes" | `InputSize` does not match the struct written with `LockstepLocalInput.Set` |
 | The match never starts | `MinPlayersToStart` is higher than the number of players; call `RequestStart` |
 | Nothing moves although the session runs | The gameplay systems are not in `LockstepSimulationSystemGroup`, or no system writes `LockstepLocalInput` |
-| Views do not appear | No `LockstepPrefabRegistryAuthoring` in the presentation world, the entity was not instantiated from the registry, or the simulation started before the subscene loaded (`waitForPrefabRegistry`) |
+| Entity views do not appear | No `LockstepPrefabRegistryAuthoring` in the presentation world, the entity was not instantiated from the registry, or the simulation started before the subscene loaded (`waitForPrefabRegistry`) |
+| GameObject views do not appear | The entity has no `EntityViewKey`, no catalog binds its key (keys are case-sensitive), or the catalog was baked into a subscene that did not load into this world: register it with `EntityViewConfigProvider` |
+| A GameObject view misses a component | No `EntityViewUpdateSystem<T>` subclass for that type, or the part sits under a nested `EntityView` |
+| A GameObject view does not move | No `TransformComponentView` on it, or the entity has no `LockstepTransform`; without `LockstepTransformPrevious` it moves in steps |
 | Connections drop when the window loses focus | `Application.runInBackground` is off |
 | A "Burst error" in the console | Burst falls back to managed code silently in some cases; fix the reported construct (for example a managed array in a Burst method) |
 | Desync reports | See [Desync detection and debugging](#desync-detection-and-debugging) |

@@ -1,0 +1,21 @@
+{
+    "name": "Pragma.Lockstep.Tests.Runtime",
+    "rootNamespace": "Pragma.Lockstep.Tests",
+    "references": [
+        "Pragma.Lockstep",
+        "Pragma.Lockstep.Views",
+        "Unity.Entities",
+        "Unity.Collections"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -1,4 +1,5 @@
 using Pragma.Lockstep.Mathematics;
+using Pragma.Lockstep.Views;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
@@ -28,6 +29,7 @@ namespace Pragma.Lockstep.Examples
                 ComponentType.ReadWrite<LockstepTransform>(),
                 ComponentType.ReadWrite<LockstepTransformPrevious>(),
                 ComponentType.ReadWrite<ArenaProjectile>(),
+                ComponentType.ReadWrite<EntityViewKey>(),
             });
             state.RequireForUpdate<LockstepTime>();
         }
@@ -105,6 +107,7 @@ namespace Pragma.Lockstep.Examples
             {
                 var projectile = state.EntityManager.CreateEntity(_projectileArchetype);
                 state.EntityManager.SetComponentData(projectile, LockstepTransform.FromPosition(shot.position));
+                state.EntityManager.SetComponentData(projectile, new EntityViewKey(ArenaViewKeys.PROJECTILE));
                 state.EntityManager.SetComponentData(projectile, new ArenaProjectile
                 {
                     ownerSlot = shot.owner,

@@ -38,26 +38,6 @@ namespace Pragma.Lockstep.Tests
             });
         }
 
-        private static void AssertSameChecksums(LockstepClient a, LockstepClient b, int minimumCommonTicks)
-        {
-            var byTick = new Dictionary<int, ulong>();
-            foreach (var pair in a.LocalChecksums)
-            {
-                byTick[pair.Key] = pair.Value;
-            }
-            var common = 0;
-            foreach (var pair in b.LocalChecksums)
-            {
-                if (!byTick.TryGetValue(pair.Key, out var hash))
-                {
-                    continue;
-                }
-                Assert.AreEqual(hash, pair.Value, $"state differs at tick {pair.Key}");
-                common++;
-            }
-            Assert.GreaterOrEqual(common, minimumCommonTicks);
-        }
-
         [Test]
         public void TwoClients_StayInSyncThroughLatencyAndJitter()
         {
@@ -74,7 +54,7 @@ namespace Pragma.Lockstep.Tests
                 Assert.IsEmpty(session.Desyncs);
                 Assert.IsFalse(a.IsDesynced || b.IsDesynced);
                 Assert.Greater(session.Server.VerifiedChecksumCount, 20);
-                AssertSameChecksums(a, b, 20);
+                TestUtility.AssertSameChecksums(a, b, 20);
 
                 var stateA = TestUtility.PlayerState(a.Simulation, b.LocalSlot);
                 Assert.Greater(stateA.movingTicks, 0, "inputs of the other player reached this client");
@@ -113,7 +93,7 @@ namespace Pragma.Lockstep.Tests
                 Assert.Greater(late.JoinTick, 100);
                 Assert.That(first.SimulatedTicks - late.SimulatedTicks, Is.InRange(-3, 3), "the late joiner caught up");
                 Assert.IsEmpty(session.Desyncs);
-                AssertSameChecksums(first, late, 20);
+                TestUtility.AssertSameChecksums(first, late, 20);
             }
         }
 

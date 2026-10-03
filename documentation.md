@@ -1,11 +1,12 @@
 # Pragma DOTS Lockstep: design notes
 
-How the package is built, what it took from ME.BECS and Photon Quantum, what it deliberately left out and why. The
-research behind it is in [mebecs_research.md](mebecs_research.md) and [photon_research.md](photon_research.md); the
+How the package is built, what it took from ME.BECS, Photon Quantum and ECV, what it deliberately left out and why.
+The research behind it is in [mebecs_research.md](mebecs_research.md) and [photon_research.md](photon_research.md); the
 user documentation is the [package README](Assets/PragmaDOTSLockstep/README.md).
 
-No code was copied from either package. The few algorithms they share with this package (Q16 fixed point, PCG32,
-SplitMix64) are public, standard algorithms, implemented here from scratch.
+No code was copied from ME.BECS or Photon Quantum. The few algorithms they share with this package (Q16 fixed point,
+PCG32, SplitMix64) are public, standard algorithms, implemented here from scratch. The GameObject views are a port of
+ECV, the view layer of the author's own DawnOfWar project, adapted to lockstep.
 
 ## Contents
 
@@ -14,6 +15,7 @@ SplitMix64) are public, standard algorithms, implemented here from scratch.
 - [Comparison](#comparison)
 - [Taken from Photon Quantum](#taken-from-photon-quantum)
 - [Taken from ME.BECS](#taken-from-mebecs)
+- [Taken from ECV](#taken-from-ecv)
 - [Not taken, and why](#not-taken-and-why)
 - [Decisions specific to Unity DOTS](#decisions-specific-to-unity-dots)
 - [Limitations and future work](#limitations-and-future-work)
@@ -58,7 +60,7 @@ SplitMix64) are public, standard algorithms, implemented here from scratch.
 | Late join | Not implemented | Snapshot from another client | Re-simulation from tick 0 |
 | Replays | Event log, timeline window | Input history + checksums, verification | Frames + checksums, verification |
 | Offline | Local transport | Local mode | Offline mode over the same protocol (loopback) |
-| Presentation | Views module, interpolation from a world copy | Entity views, four frames, misprediction smoothing | `LockstepViewSystem` / direct reads, `LockstepTransformPrevious` interpolation |
+| Presentation | Views module, interpolation from a world copy | Entity views, four frames, misprediction smoothing | GameObject views ported from ECV, `LockstepViewSystem` entity views, direct reads; `LockstepTransformPrevious` interpolation |
 | Transport | Photon, Ragon, local | Photon Realtime | Netcode for Entities RPC, loopback, custom `ILockstepTransport` |
 
 ## Taken from Photon Quantum
@@ -92,9 +94,68 @@ SplitMix64) are public, standard algorithms, implemented here from scratch.
 | Hash only final states | Only snapshots outside the rollback window | Only confirmed ticks are ever simulated, so every hash is final |
 | Deterministic ids for new entities | Pre-allocation by job item, sorted batches | `LockstepEntityId` assigned in query order at the end of the tick |
 | Per-entity random streams in the state | `Ents.seeds` | `FixedRandom.CreateFromIndex(seed, lockstepEntityId.value)` stored in a component once the id is assigned |
-| Views separated from the simulation | Views module spawns from simulation data, frozen during re-simulation | `LockstepViewSystem` mirrors simulation entities; nothing writes back |
+| Views separated from the simulation | Views module spawns from simulation data, frozen during re-simulation | `EntityViewManagerSystem` and `LockstepViewSystem` mirror simulation entities; nothing writes back |
 | "Who am I" only outside the tick | `GetActivePlayer()` asserts it is not in a tick | The simulation has no notion of a local player; `LocalSlot` exists only on the client object |
 | Replays as input logs | Event log and timeline window | Frame log (`LockstepFrameHistory`) and replay export from client, server and the debug window |
+
+## Taken from ECV
+
+ECV (Entity Component View, `DOTS.ECV` in DawnOfWar, an RTS on Entities 1.4 and Netcode ghosts) shows entities with
+GameObjects: a pooled `EntityView` prefab per entity key, one `EntityComponentView<T>` MonoBehaviour per component type,
+and one `EntityViewUpdateSystem<T>` per type that pushes the components whose chunks changed. It lives in the same world
+as the entities it shows, which lockstep forbids: a presentation write to a simulated entity, even a tag, moves it to
+another archetype and changes the chunk order, the state hash and the order `LockstepEntityId`s are handed out in, so
+the clients diverge. The port keeps the shape and replaces everything that wrote to the shown world.
+
+| Idea | In ECV | In this package |
+|---|---|---|
+| Root view plus one part per component type | `EntityView`, `EntityComponentView<T>`, `IEntityComponentView<T>` | Same names and members; several parts may show one type; parts of nested views stay with their own root |
+| Parts that react to changes only | `EntityComponentViewUnmanaged<T>` with `EqualityComparer<T>` | Same, compared bytewise (the default comparer of a struct without `IEquatable` reflects and boxes) |
+| Cache reset when a pooled view is reused | `Bind` clears the last value | Same |
+| One generic system per component type | `EntityViewUpdateSystem<T>` with a change filter and `ConfigureQuery` | Same API; chunks of the simulation world filtered by its change versions, plus every value for views spawned, attached or forced since the last push |
+| Views from a pool | `com.pragma.pool`, `EntityView : PrefabPoolObject` | `IEntityViewPool`, set per project (`EntityViewManagerSystem.PoolFactory`) or per world; `EntityViewPool` by default; com.pragma.pool through a small adapter |
+| One place that spawns and returns views, returns first | `EntityViewManagerSystem` | Same |
+| Catalog of view prefabs apart from the model prefabs, linked by a key | `EntityViewConfig`, `EntityPrefabViewRegistry`, `EntityIdentifier` | `EntityViewConfig` and `EntityViewKey`: baked (`EntityViewConfigAuthoring`) or registered at runtime (`EntityViewConfigProvider`) |
+| No view graphics in server builds | The baker skips `NetcodeConversionTarget.Server` | Same |
+| Index from entity to view | `EntityViewManager` | Same, plus `Attach` for views the caller owns (what `SingletonEntityViews` was for) and `ForceUpdate` |
+| Transform part | `TransformComponentView` fed with `LocalTransform` | Same part, fed with `LockstepTransform` interpolated between ticks |
+
+**Adapted, and why.**
+
+- **Lifetimes by comparison.** ECV tags entities with a cleanup component and returns a view when only the cleanup
+  "shell" is left. A presentation may not add anything to a simulated entity, so the manager compares the keyed
+  entities with its views, and only when a tick created, destroyed or re-keyed some (the order version and the change
+  versions of `EntityViewKey`), or a view was destroyed from outside.
+- **Change detection across worlds.** A presentation system cannot use the change filters of a query in another world
+  (they are tied to the system that owns the query), so the update systems compare chunk change versions with one
+  below the simulation version they saw last: every system bumps the global version once more when it finishes, so a
+  write made outside systems after a push (the session's `LockstepTime`) carries exactly the version seen. Toggling an
+  enableable component of the query counts as a change too, because it moves entities in or out of the query. Views
+  spawned since the last push get every value, which replaces ECV's `forceUpdateVersion` write.
+- **Pool state.** A pooled view starts every binding fresh: the cached values of its parts are forgotten and
+  auto-update comes back on, so a previous owner's pause or value never leaks to the next entity.
+- **A key in the simulation.** ECV keys views by `EntityIdentifier`, part of another framework. `EntityViewKey` is
+  ordinary simulation data, so entities created in code (the sample) get views as well as baked prefabs, and changing
+  the key swaps the view.
+- **No managed components.** They are deprecated in Entities 6.6: the catalog is an unmanaged buffer with
+  `UnityObjectRef<GameObject>`, and the index lives in the system, found with `EntityViewManager.TryGet(world)`.
+- **Runtime catalogs.** Lockstep games create their worlds on demand (a lobby, a match), after the subscenes have
+  loaded into the worlds that existed, so a catalog can also be registered at runtime.
+- **Lazy initialization.** Views collect their parts on first use, not only in `Awake`, which does not run for
+  instances created in edit mode (the tests) or spawned inactive.
+
+**Not taken from ECV.**
+
+- `ViewReferenceComponent` (a managed reference from the entity to its view) and `AutoUpdateViewTagComponent`: both
+  live on the shown entity. `EntityViewManager.TryGetView` and `EntityView.IsAutoUpdateEnabled` replace them.
+- `ConfigStorageComponent` and `EntityConfig`: configuration storage built on managed components and DOTS.Common
+  commands, not part of the views.
+- The editor preview of authored data on view prefabs (`IEntityAuthoringRefreshHandler`): it belongs to the
+  EntityCompositeAuthoring framework. The boxed `EntityView.UpdateData(IComponentData)` stays for such tools.
+- Odin's key dropdown and the `WorldResolver` service lookup: dependencies the package does not take; keys are plain
+  strings and the pool comes from `PoolFactory`.
+- The game's views (health bar, player color, selection). Selection in particular is local to a player and belongs to
+  the presentation in lockstep, not to a simulation component as in DawnOfWar.
 
 ## Not taken, and why
 
@@ -183,6 +244,10 @@ These came up while building on Entities; neither reference package deals with t
    down; commands are never dropped; waiting is opt-in (`MaxInputWaitTicks`).
 8. **Desync attribution.** The server compares checksums by majority and names the clients that disagree, so the
    wrong machine can be told apart from the right ones (with two players, both are flagged).
+9. **Presentation that never writes.** Entities ties the usual presentation tools (cleanup components, query change
+   filters) to the world being shown. The views read a world they may not touch, so they find lifetimes by comparing
+   entities with views and changes by comparing chunk change versions with the last version they saw. A test runs two
+   clients, one of them with views, and checks that their state hashes stay equal.
 
 ## Limitations and future work
 

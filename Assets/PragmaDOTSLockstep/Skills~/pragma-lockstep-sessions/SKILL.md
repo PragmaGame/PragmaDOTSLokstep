@@ -205,5 +205,6 @@ simulation needs the prefab registry. Replays need the same simulation build.
 | "input set on the client is N bytes but the session input size is M" | `InputSize` != `UnsafeUtility.SizeOf<TInput>()` of the struct written to `LockstepLocalInput` |
 | Starts but nothing reacts to input | No system in `LockstepInputSystemGroup` writes `LockstepLocalInput`, or gameplay systems are outside `LockstepSimulationSystemGroup` |
 | Disconnects when unfocused | `Application.runInBackground = false` |
-| Views missing | No registry in the presentation world, or `waitForPrefabRegistry` off while the subscene loads late |
+| Entity views missing | No registry in the presentation world, or `waitForPrefabRegistry` off while the subscene loads late |
+| GameObject views missing in worlds created on demand | The view catalog was baked into a subscene that loaded before the world existed: register it with `EntityViewConfigProvider` |
 | Desync errors | Use the `pragma-lockstep-desync` skill |

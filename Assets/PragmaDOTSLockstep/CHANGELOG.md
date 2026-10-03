@@ -4,6 +4,22 @@ All notable changes to this package are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- GameObject views (`Pragma.Lockstep.Views`), adapted from ECV (Entity Component View): `EntityView` prefabs with
+  one part per component type (`EntityComponentView<T>`, `EntityComponentViewUnmanaged<T>`, `TransformComponentView`),
+  spawned and returned by `EntityViewManagerSystem` for the simulation entities with an `EntityViewKey`, fed by
+  `EntityViewUpdateSystem<T>` when their component changes and by `TransformViewUpdateSystem` with interpolated
+  transforms. Nothing is written to the simulation world.
+- View catalogs: `EntityViewConfig`, baked with `EntityViewConfigAuthoring` (skipped for dedicated servers) or
+  registered at runtime with `EntityViewConfigProvider` / `EntityViewConfigs`; `EntityViewKeyAuthoring` bakes keys.
+- Pool abstraction: `IEntityViewPool`, chosen per project with `EntityViewManagerSystem.PoolFactory` or per world with
+  `EntityViewManagerSystem.Pool`; `EntityViewPool` is the default.
+- `EntityViewManager`: views by entity, `Attach`/`Detach` for views the caller owns (HUD panels), `ForceUpdate`.
+- The sample shows its avatars and projectiles with GameObject views.
+
 ## [1.0.0] - 2026-10-03
 
 ### Added

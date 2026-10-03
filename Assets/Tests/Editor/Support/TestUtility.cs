@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using NUnit.Framework;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 
@@ -53,6 +55,27 @@ namespace Pragma.Lockstep.Tests
         public static TestPlayerState PlayerState(LockstepSimulation simulation, int slot)
         {
             return simulation.World.EntityManager.GetComponentData<TestPlayerState>(PlayerEntity(simulation, slot));
+        }
+
+        /// <summary>Both clients hashed the same state on every tick they both checked, and on enough of them.</summary>
+        public static void AssertSameChecksums(LockstepClient a, LockstepClient b, int minimumCommonTicks)
+        {
+            var byTick = new Dictionary<int, ulong>();
+            foreach (var pair in a.LocalChecksums)
+            {
+                byTick[pair.Key] = pair.Value;
+            }
+            var common = 0;
+            foreach (var pair in b.LocalChecksums)
+            {
+                if (!byTick.TryGetValue(pair.Key, out var hash))
+                {
+                    continue;
+                }
+                Assert.AreEqual(hash, pair.Value, $"state differs at tick {pair.Key}");
+                common++;
+            }
+            Assert.GreaterOrEqual(common, minimumCommonTicks);
         }
     }
 }

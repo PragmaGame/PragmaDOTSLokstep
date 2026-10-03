@@ -21,12 +21,14 @@ The package is unreleased: backward compatibility is not required yet, prefer cl
 | `Assets/PragmaDOTSLockstep/Runtime/Simulation/Components` | Simulation components and singletons |
 | `Assets/PragmaDOTSLockstep/Runtime/Transforms` | `LockstepTransform`, history and interpolation |
 | `Assets/PragmaDOTSLockstep/Runtime/Client` | Local input, `LockstepWorlds`, offline mode, prefab registry copy, `LockstepViewSystem` |
+| `Assets/PragmaDOTSLockstep/Runtime/Views` | `Pragma.Lockstep.Views`: GameObject views ported from ECV (DawnOfWar): `EntityView`, view parts, `EntityViewKey`, `EntityViewManagerSystem`, update systems, catalogs, `IEntityViewPool` |
 | `Assets/PragmaDOTSLockstep/Runtime/Netcode` | `Pragma.Lockstep.Netcode`: the RPC and the Netcode server and client systems |
 | `Assets/PragmaDOTSLockstep/Runtime/Netcode/Components` | Server/client config, status and start/end request components |
 | `Assets/PragmaDOTSLockstep/Runtime/Authoring` | `Pragma.Lockstep.Authoring`: bakers |
 | `Assets/PragmaDOTSLockstep/Editor` | Fixed-point drawers, *Window > Pragma > Lockstep Sessions* |
 | `Assets/PragmaDOTSLockstep/Skills~` | Claude Code skills shipped with the package (gameplay, sessions, desync); Unity skips the folder. Read them before writing simulation code |
 | `Assets/Tests/Editor` | `Pragma.Lockstep.Tests.Editor`: the EditMode suite (not shipped); helpers and test components in `Support` |
+| `Assets/Tests/Runtime` | `Pragma.Lockstep.Tests.Runtime`: MonoBehaviours the tests add to GameObjects; Unity refuses components from Editor assemblies |
 | `Assets/Examples` | *Lockstep Arena* sample (not shipped); its systems run in every simulation world of this project |
 | `documentation.md`, `mebecs_research.md`, `photon_research.md` | Design notes and the research they are based on |
 
@@ -57,6 +59,10 @@ The package is unreleased: backward compatibility is not required yet, prefer cl
   framer fragments larger messages. Connections are tracked by entity, not by `NetworkId`.
 - **No managed components** (deprecated in Entities 6.6): running sessions are found through the static
   `LockstepWorlds` registry keyed by `World.SequenceNumber`.
+- **The presentation never writes to the simulation world**, not even a tag or a cleanup component: it would move the
+  entity to another archetype, change the chunk order, the hash and the `LockstepEntityId` order. GameObject views find
+  lifetimes by comparing keyed entities with their views and changes by chunk change versions;
+  `EntityViewTests.Views_LeaveTheSimulationUntouched` guards it. Local state (selection, hover) stays on the views.
 - **Burst.** Burst-compiled code must not allocate managed arrays (archetypes use `stackalloc ComponentType[] { ... }`).
   Burst falls back to managed code with only a console error, so tests still pass: check the console for
   "Burst error" after touching Burst code.
@@ -118,11 +124,14 @@ to a drive letter with `subst`.
 
 - `Assets/Tests/Editor` is the EditMode suite: math accuracy and Burst equality, golden results, serialization,
   checksums, simulation rules, sessions (latency, jitter, late join, disconnects, desync attribution, replays),
-  presentation, offline mode and a real Netcode server with two clients.
+  presentation, GameObject views, offline mode and a real Netcode server with two clients.
 - The suite reaches internals through `InternalsVisibleTo` in `Runtime/AssemblyInfo.cs`.
 - `Assets/Tests/Editor/AssemblyInfo.cs` has `[assembly: DisableAutoCreation]`: test systems enter simulations only
   through `LockstepSimulationOptions.AdditionalSystems`. In `Support`, `SessionHarness` runs a server and clients over
-  the loopback network and `FrameBuilder` writes frames by hand in the wire format.
+  the loopback network, `FrameBuilder` writes frames by hand in the wire format and `ViewHarness` is a presentation
+  world with the view systems and a runtime catalog.
+- MonoBehaviours a test adds to a GameObject (view parts) go to `Assets/Tests/Runtime`: `AddComponent` refuses scripts
+  from Editor assemblies ("Can't add script behaviour ... because it is an editor script").
 - Settings and configs are structs with properties: never mutate a struct-typed property in place
   (`config.StartData.Add(x)` changes a copy and compiles silently); build a local and assign it.
 - The Netcode integration test disables `LockstepInputSystemGroup` in its worlds, so the sample's input system does

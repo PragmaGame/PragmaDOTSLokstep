@@ -1,4 +1,5 @@
 using Pragma.Lockstep.Mathematics;
+using Pragma.Lockstep.Views;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
@@ -21,6 +22,7 @@ namespace Pragma.Lockstep.Examples
                 ComponentType.ReadWrite<LockstepTransformPrevious>(),
                 ComponentType.ReadWrite<ArenaAvatar>(),
                 ComponentType.ReadWrite<LockstepEntityId>(),
+                ComponentType.ReadWrite<EntityViewKey>(),
             });
             state.RequireForUpdate<LockstepRandom>();
         }
@@ -63,6 +65,7 @@ namespace Pragma.Lockstep.Examples
                 var spawn = random.NextVector2(new FixedVector2(-range), new FixedVector2(range));
                 var avatar = state.EntityManager.CreateEntity(_avatarArchetype);
                 state.EntityManager.SetComponentData(avatar, LockstepTransform.FromPosition(new FixedVector3(spawn.x, FixedPoint.Zero, spawn.y)));
+                state.EntityManager.SetComponentData(avatar, new EntityViewKey(ArenaViewKeys.AVATAR));
                 state.EntityManager.SetComponentData(avatar, new ArenaAvatar
                 {
                     slot = joined[i],
