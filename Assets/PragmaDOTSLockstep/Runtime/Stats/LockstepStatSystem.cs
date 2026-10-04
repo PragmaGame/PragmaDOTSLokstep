@@ -1,4 +1,3 @@
-using Pragma.Lockstep.Mathematics;
 using Unity.Burst;
 using Unity.Burst.Intrinsics;
 using Unity.Collections;
@@ -326,61 +325,13 @@ namespace Pragma.Lockstep.Stats
                     {
                         continue;
                     }
-                    var isCapped = TryGetCap(stats, stat.cap, out var cap);
+                    stat.value = LockstepStats.ResolveResource(stats, stat, changes, out var isCapped, out var cap);
                     if (isCapped)
                     {
-                        stat.value = Fit(stat, cap);
                         stat.max = cap;
-                    }
-                    if (changes.IsCreated)
-                    {
-                        stat.value += Sum(changes, stat.type);
-                    }
-                    stat.value = FixedMath.Max(stat.value, FixedPoint.Zero);
-                    if (isCapped)
-                    {
-                        stat.value = FixedMath.Min(stat.value, cap);
                     }
                     stats[i] = stat;
                 }
-            }
-
-            private static bool TryGetCap(DynamicBuffer<LockstepStat> stats, int type, out FixedPoint cap)
-            {
-                cap = FixedPoint.Zero;
-                if (type == LockstepStat.NONE || !stats.TryGet(type, out var attribute) || !attribute.IsAttribute)
-                {
-                    return false;
-                }
-                cap = FixedMath.Max(attribute.value, FixedPoint.Zero);
-                return true;
-            }
-
-            // The amount for a new cap. A resource whose cap was zero, as a new one, counts as full.
-            private static FixedPoint Fit(in LockstepStat stat, FixedPoint cap)
-            {
-                if (stat.max <= FixedPoint.Zero)
-                {
-                    return cap;
-                }
-                if (stat.capPolicy == LockstepStatCapPolicy.KeepRatio && cap != stat.max)
-                {
-                    return stat.value * cap / stat.max;
-                }
-                return stat.value;
-            }
-
-            private static FixedPoint Sum(NativeArray<LockstepStatChange> changes, int type)
-            {
-                var sum = FixedPoint.Zero;
-                for (var i = 0; i < changes.Length; i++)
-                {
-                    if (changes[i].stat == type)
-                    {
-                        sum += changes[i].amount;
-                    }
-                }
-                return sum;
             }
         }
     }

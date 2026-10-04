@@ -64,6 +64,34 @@ namespace Pragma.Lockstep.Stats
             return TryGetValue(stats, Id(type), out value);
         }
 
+        /// <summary>
+        /// The amount a resource will have once <see cref="LockstepStatSystem"/> applies the changes in
+        /// <paramref name="changes"/>, with its cap as of the last update; an attribute gives its value. Check a payment
+        /// against it in a system before <see cref="LockstepStatSystem"/>: <c>TryGetValue</c> does not see the payments
+        /// already added on this tick, so two of them could spend the same amount. False when the entity does not have
+        /// the stat.
+        /// </summary>
+        public static bool TryGetPendingValue(this DynamicBuffer<LockstepStat> stats, DynamicBuffer<LockstepStatChange> changes, int type,
+                                              out FixedPoint value)
+        {
+            var index = IndexOf(stats, type);
+            if (index < 0)
+            {
+                value = FixedPoint.Zero;
+                return false;
+            }
+            var stat = stats[index];
+            value = stat.IsResource ? ResolveResource(stats, stat, changes.IsCreated ? changes.AsNativeArray() : default, out _, out _) : stat.value;
+            return true;
+        }
+
+        /// <inheritdoc cref="TryGetPendingValue(DynamicBuffer{LockstepStat}, DynamicBuffer{LockstepStatChange}, int, out FixedPoint)"/>
+        public static bool TryGetPendingValue<TType>(this DynamicBuffer<LockstepStat> stats, DynamicBuffer<LockstepStatChange> changes, TType type,
+                                                     out FixedPoint value) where TType : unmanaged, Enum
+        {
+            return TryGetPendingValue(stats, changes, Id(type), out value);
+        }
+
         /// <summary>The value of an attribute without modifiers; false when the entity does not have the attribute.</summary>
         public static bool TryGetBase(this DynamicBuffer<LockstepStat> stats, int type, out FixedPoint baseValue)
         {
@@ -204,6 +232,63 @@ namespace Pragma.Lockstep.Stats
                 }
             }
             return true;
+        }
+
+        // The amount of a resource after fitting it to its cap and applying changes (default: none). The one rule of
+        // LockstepStatSystem and TryGetPendingValue, so a checked payment is exactly what the update leaves.
+        internal static FixedPoint ResolveResource(DynamicBuffer<LockstepStat> stats, in LockstepStat stat, NativeArray<LockstepStatChange> changes,
+                                                   out bool isCapped, out FixedPoint cap)
+        {
+            isCapped = TryGetCap(stats, stat.cap, out cap);
+            var amount = isCapped ? Fit(stat, cap) : stat.value;
+            if (changes.IsCreated)
+            {
+                amount += Sum(changes, stat.type);
+            }
+            amount = FixedMath.Max(amount, FixedPoint.Zero);
+            if (isCapped)
+            {
+                amount = FixedMath.Min(amount, cap);
+            }
+            return amount;
+        }
+
+        private static bool TryGetCap(DynamicBuffer<LockstepStat> stats, int type, out FixedPoint cap)
+        {
+            cap = FixedPoint.Zero;
+            if (type == LockstepStat.NONE || !stats.TryGet(type, out var attribute) || !attribute.IsAttribute)
+            {
+                return false;
+            }
+            cap = FixedMath.Max(attribute.value, FixedPoint.Zero);
+            return true;
+        }
+
+        // The amount for a new cap. A resource whose cap was zero, as a new one, counts as full.
+        private static FixedPoint Fit(in LockstepStat stat, FixedPoint cap)
+        {
+            if (stat.max <= FixedPoint.Zero)
+            {
+                return cap;
+            }
+            if (stat.capPolicy == LockstepStatCapPolicy.KeepRatio && cap != stat.max)
+            {
+                return stat.value * cap / stat.max;
+            }
+            return stat.value;
+        }
+
+        private static FixedPoint Sum(NativeArray<LockstepStatChange> changes, int type)
+        {
+            var sum = FixedPoint.Zero;
+            for (var i = 0; i < changes.Length; i++)
+            {
+                if (changes[i].stat == type)
+                {
+                    sum += changes[i].amount;
+                }
+            }
+            return sum;
         }
 
         private static int IndexOf(in DynamicBuffer<LockstepStat> stats, int type)

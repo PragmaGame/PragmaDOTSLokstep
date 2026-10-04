@@ -805,7 +805,7 @@ recalculates only what changed.
 | `LockstepStatTarget` | Buffer element: a group the entity belongs to for grants (its type, its category) |
 | `LockstepStatSource` | What applied a modifier, a grant or a change: two numbers the game picks (`kind`, `id`) |
 | `LockstepStatSystem` | In `LockstepSimulationSystemGroup`: removes expired modifiers and grants, recalculates the attributes whose base values, modifiers or grants changed, fits resources to their caps and applies the tick's changes |
-| `LockstepStats` | Extensions on the stat buffer, also taking the game's enum: `TryGet`, `TryGetValue`, `TryGetBase`, `TrySetBase`; `RemoveModifiers`, `RemoveGrants`, `Calculate` (the formula, for tooltips and previews), `Id` |
+| `LockstepStats` | Extensions on the stat buffer, also taking the game's enum: `TryGet`, `TryGetValue`, `TryGetPendingValue`, `TryGetBase`, `TrySetBase`; `RemoveModifiers`, `RemoveGrants`, `Calculate` (the formula, for tooltips and previews), `Id` |
 
 ### Setting it up
 
@@ -897,6 +897,10 @@ public partial struct SpeedStatSystem : ISystem
   the result does not depend on the order the changes were added in. A change of an attribute changes nothing. Until
   `LockstepStatSystem` runs, the buffer lists the tick's changes with their sources, for whatever needs to know who
   dealt the damage.
+- **Payments.** `value` is the amount as of the last update, so it does not see the payments already added on this
+  tick. Check a price with `stats.TryGetPendingValue(changes, type, out amount)`: the amount the update will leave after
+  the changes in the buffer, under the cap as of the last update. Two purchases on one tick then cannot spend the same
+  money.
 - **Caps.** A resource follows the attribute named in `cap` as that attribute is on the same tick. `KeepRatio` keeps
   the share (80 of 100 becomes 120 of 150, and 80 of 100 again), so a bonus to the maximum neither heals nor wounds;
   `Clamp` keeps the amount and cuts it down to a lower cap. A capped resource starts full, under the modifiers of its cap,

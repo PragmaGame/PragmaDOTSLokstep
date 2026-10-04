@@ -47,7 +47,9 @@ and this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     names it and whose `LockstepStatTarget`s match, the later ones included;
   - `LockstepStatSystem` removes expired modifiers and grants and recalculates, in parallel, only the chunks where
     something changed; `LockstepStats` reads and changes stats (`TryGet`, `TryGetValue`, `TryGetBase`, `TrySetBase`,
-    also with the game's enum), removes modifiers and grants by source and computes the formula.
+    also with the game's enum), removes modifiers and grants by source and computes the formula;
+  - `LockstepStats.TryGetPendingValue`: the amount a resource will have after the changes not yet applied on this tick,
+    by the same rule as the update, to check payments against.
 - Command data: besides its payload struct (still up to 122 bytes) a command carries data of any length, an array of
   any unmanaged element type, for lists such as the unit ids of an order. `LockstepCommand.Create(payload, data,
   dataBuffer)` writes it into the new `LockstepCommandData` buffer, which the local input entity and every player

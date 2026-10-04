@@ -174,7 +174,7 @@ Namespace and assembly `Pragma.Lockstep.Stats`.
 | `LockstepStatTarget` | Buffer of a receiver: `int value`, a group grants can target; `Create(enum)` |
 | `LockstepStatSource` | `uint kind`, `uint id`, equality. What applied a modifier, grant or change; one source's modifiers are removed together |
 | `LockstepStatSystem` | In `LockstepSimulationSystemGroup`: removes expired modifiers and grants, recalculates the chunks whose stats, modifiers, grantors or targets changed, whose grantors' grants changed or which have pending changes, writes `LockstepStat` only then |
-| `LockstepStats` | Extensions on `DynamicBuffer<LockstepStat>`, each with an `int` or enum type: `TryGet(type, out LockstepStat)`, `TryGetValue`, `TryGetBase`, `TrySetBase` (attributes only). `RemoveModifiers(modifiers, source)`, `RemoveGrants(grants, source)` (return the count, keep the order), `Calculate(type, baseValue, NativeArray<LockstepStatModifier>)`, `Id(enum)` |
+| `LockstepStats` | Extensions on `DynamicBuffer<LockstepStat>`, each with an `int` or enum type: `TryGet(type, out LockstepStat)`, `TryGetValue`, `TryGetPendingValue(changes, type, out value)` (a resource after the changes not yet applied, for payments), `TryGetBase`, `TrySetBase` (attributes only). `RemoveModifiers(modifiers, source)`, `RemoveGrants(grants, source)` (return the count, keep the order), `Calculate(type, baseValue, NativeArray<LockstepStatModifier>)`, `Id(enum)` |
 
 Attributes, over own modifiers and received grants:
 `value = (base + sum of Flat) * max(0, 1 + sum of AdditivePercent) * product of max(0, 1 + MultiplicativePercent)`; the

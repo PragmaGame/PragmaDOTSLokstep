@@ -299,7 +299,8 @@ gameplay spends and refills (health, morale, energy, money), are stats of `Pragm
   ends an effect, and removing before adding again refreshes it instead of stacking.
 - **Changes (resources).** Damage, healing, income and payments are `LockstepStatChange.Create(stat, amount, source)`
   added before `LockstepStatSystem`: the tick's changes are summed, the amount stays within 0 and the cap, the buffer is
-  cleared. Never write a resource's `value` by hand.
+  cleared. Never write a resource's `value` by hand. Check a price with `stats.TryGetPendingValue(changes, type, out
+  amount)`, not `TryGetValue`: `value` does not see the payments already added on this tick.
 - **Grants (groups).** Research or a squad ability goes into the `LockstepStatGrant` buffer of the player's or squad's
   entity with a `target` (`ANY` or a `LockstepStatTarget` of the receivers); every entity whose `LockstepStatGrantor`
   names that entity gets it, also the ones created later. Name the grantor where the unit is created.

@@ -325,6 +325,45 @@ namespace Pragma.Lockstep.Tests
         }
 
         [Test]
+        public void PendingValue_IsWhatTheUpdateLeavesAfterTheChangesOfTheTick()
+        {
+            using (var simulation = CreateSimulation())
+            {
+                var entityManager = simulation.World.EntityManager;
+                var unit = CreateEntity(entityManager,
+                    LockstepStat.Attribute(MAX_HEALTH, 100), LockstepStat.Resource(HEALTH, MAX_HEALTH, LockstepStatCapPolicy.KeepRatio),
+                    LockstepStat.Resource(GOLD, 100));
+
+                Assert.IsTrue(Pending(entityManager, unit, HEALTH, out var health));
+                Assert.AreEqual((FixedPoint)100, health, "a capped resource that was never updated counts as full");
+                Assert.IsTrue(Pending(entityManager, unit, MAX_HEALTH, out var maxHealth));
+                Assert.AreEqual((FixedPoint)100, maxHealth, "an attribute gives its value");
+                Assert.IsFalse(Pending(entityManager, unit, SPEED, out _), "the entity does not have the stat");
+
+                // Two payments of one tick: the second one sees the first.
+                AddChanges(entityManager, unit, (GOLD, -30));
+                Assert.IsTrue(Pending(entityManager, unit, GOLD, out var gold));
+                Assert.AreEqual((FixedPoint)70, gold);
+                AddChanges(entityManager, unit, (GOLD, -50), (HEALTH, -30), (HEALTH, 10));
+                Assert.IsTrue(Pending(entityManager, unit, GOLD, out gold));
+                Assert.AreEqual((FixedPoint)20, gold);
+                Assert.IsTrue(Pending(entityManager, unit, HEALTH, out health));
+                Assert.AreEqual((FixedPoint)80, health);
+                Assert.AreEqual((FixedPoint)100, Value(entityManager, unit, GOLD), "nothing is applied before the update");
+
+                TestUtility.Step(simulation);
+                AssertResource(entityManager, unit, GOLD, 20, 0, "the update leaves the pending value");
+                AssertResource(entityManager, unit, HEALTH, 80, 100);
+
+                AddChanges(entityManager, unit, (GOLD, -50), (HEALTH, 1000));
+                Assert.IsTrue(Pending(entityManager, unit, GOLD, out gold));
+                Assert.AreEqual(FixedPoint.Zero, gold, "never below zero");
+                Assert.IsTrue(Pending(entityManager, unit, HEALTH, out health));
+                Assert.AreEqual((FixedPoint)100, health, "never above the cap");
+            }
+        }
+
+        [Test]
         public void Grants_ReachTheTargetedReceiversAlsoTheLaterOnes()
         {
             using (var simulation = CreateSimulation())
@@ -638,6 +677,11 @@ namespace Pragma.Lockstep.Tests
         {
             Assert.IsTrue(entityManager.GetBuffer<LockstepStat>(unit, true).TryGetValue(type, out var value), $"stat {type}");
             return value;
+        }
+
+        private static bool Pending(EntityManager entityManager, Entity unit, int type, out FixedPoint value)
+        {
+            return entityManager.GetBuffer<LockstepStat>(unit, true).TryGetPendingValue(entityManager.GetBuffer<LockstepStatChange>(unit, true), type, out value);
         }
 
         private static void AssertResource(EntityManager entityManager, Entity unit, int type, int value, int max, string message = null)
