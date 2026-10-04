@@ -3,13 +3,15 @@ using Unity.Entities;
 
 namespace Pragma.Lockstep.Views
 {
-    /// <summary>A part of an <see cref="EntityView"/> that shows one component type of the simulation entity.</summary>
+    /// <summary>
+    /// A part of an <see cref="EntityView"/> that shows one component type, or one dynamic buffer, of the simulation entity.
+    /// </summary>
     public interface IEntityComponentView
     {
-        /// <summary>The component type this part shows.</summary>
+        /// <summary>The component type this part shows, or the element type of the buffer.</summary>
         Type DataType { get; }
 
-        /// <summary>Boxed variant of the typed <c>UpdateData</c>.</summary>
+        /// <summary>Boxed variant of the typed <c>UpdateData</c> of a component part.</summary>
         void UpdateData(IComponentData data);
 
         /// <summary>Shows or hides the part.</summary>

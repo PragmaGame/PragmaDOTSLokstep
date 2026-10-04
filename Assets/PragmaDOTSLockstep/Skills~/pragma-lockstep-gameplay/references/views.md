@@ -20,9 +20,10 @@ Namespace `Pragma.Lockstep.Views` (assembly `Pragma.Lockstep.Views`); the author
    `EntityViewKeyAuthoring` on a registry prefab. It is simulation state, part of the hash: set it the same way on every
    client. Changing it swaps the view.
 2. **Prefab.** `EntityView` on the root, `TransformComponentView` to follow the interpolated `LockstepTransform`, one
-   part per component type to show.
-3. **Update system.** `public partial class HealthViewUpdateSystem : EntityViewUpdateSystem<Health> { }`, one per
-   component type shown, in any assembly (its presentation filter keeps it out of simulation worlds).
+   part per component type or dynamic buffer to show.
+3. **Update system.** `public partial class HealthViewUpdateSystem : EntityViewUpdateSystem<Health> { }` per
+   component type, `public partial class StatViewUpdateSystem : EntityBufferViewUpdateSystem<LockstepStat> { }` per
+   buffer element type, in any assembly (its presentation filter keeps it out of simulation worlds).
 4. **Catalog.** An `EntityViewConfig` asset binding keys to prefabs, baked or registered at runtime (below).
 
 ## Parts
@@ -31,15 +32,18 @@ Namespace `Pragma.Lockstep.Views` (assembly `Pragma.Lockstep.Views`); the author
 |---|---|
 | `EntityComponentView<T>` | `UpdateData(T)` whenever the chunk holding the entity's `T` was written; may repeat a value |
 | `EntityComponentViewUnmanaged<T>` | `OnUpdateData(T)` only when the bytes changed; the cache is cleared on `Bind` |
+| `EntityBufferView<T>` | `UpdateData(DynamicBuffer<T>)` whenever the chunk holding the entity's buffer was written; read-only, valid during the call, may repeat the contents |
 | `TransformComponentView` | Applies a `LocalTransform`: world position, rotation, uniform scale |
 
-Virtual members: `Bind()` (the view got an entity), `BindBreak()` (it is about to lose it), `SetViewEnable(bool)`
-(default: `SetActive`). `View` is the root: `View.Entity`, `View.Client` (`LocalSlot` for "is this mine"). Several
+All parts derive from `EntityViewPart`. Virtual members: `Bind()` (the view got an entity), `BindBreak()` (it is about
+to lose it), `SetViewEnable(bool)` (default: `SetActive`). `View` is the root: `View.Entity`, `View.Client` (`LocalSlot` for "is this mine"). Several
 parts may show one type; a part under a nested `EntityView` belongs to that one. Parts are MonoBehaviours, so they
 must live in runtime (non-Editor) assemblies.
 
 ## Update systems
 
+- `EntityBufferViewUpdateSystem<T>` (`T : unmanaged, IBufferElementData`) pushes buffers the same way as the
+  component system below, to `EntityBufferView<T>` parts.
 - `EntityViewUpdateSystem<T>` (`T : unmanaged, IComponentData`) runs in `EntityViewUpdateSystemGroup`
   (`PresentationSystemGroup`, after `EntityViewManagerSystem`). It pushes the chunks whose `T` changed since its last
   push (change versions of the simulation world, so writes made outside systems such as `LockstepTime` count too) and
@@ -76,8 +80,8 @@ must live in runtime (non-Editor) assemblies.
 `EntityView`: `Entity`, `Client`, `IsBound`, `IsAttached`, `IsAutoUpdateEnabled` (pauses the pushes, transform
 included; turning it on catches up), `Transform`, `GetComponentView<T>()`, `SetComponentViewEnable<T>(bool)`,
 `UpdateData<T>(T)`, `UpdateData(IComponentData)`, `IsHasHandler(Type)`, `IsHasHandlers(params Type[])`,
-`RefreshComponentViews()`, `TryGetData<T>(out T)` (reads any component of the entity from the simulation world; false
-while unbound or when the entity lacks it).
+`RefreshComponentViews()`, `TryGetData<T>(out T)` and `TryGetBuffer<T>(out DynamicBuffer<T>)` (read any component or
+buffer of the entity from the simulation world; false while unbound or when the entity lacks it), `UpdateBuffer<T>`.
 
 `EntityViewManagerSystem` spawns and returns views when a tick created, destroyed or re-keyed keyed entities (and
 right away when a view was destroyed from outside): views of entities that went away or changed their key are returned

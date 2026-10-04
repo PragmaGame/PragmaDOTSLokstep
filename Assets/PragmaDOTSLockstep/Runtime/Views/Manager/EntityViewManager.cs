@@ -153,9 +153,9 @@ namespace Pragma.Lockstep.Views
 
         internal void PushData<TData>(Entity entity, TData data) where TData : unmanaged, IComponentData
         {
-            if (_views.TryGetValue(entity, out var view))
+            if (_views.TryGetValue(entity, out var view) && CanPush(view))
             {
-                Push(view, data);
+                view.UpdateData(data);
             }
             if (_attachedCount == 0 || !_attached.TryGetValue(entity, out var views))
             {
@@ -163,22 +163,41 @@ namespace Pragma.Lockstep.Views
             }
             for (var i = 0; i < views.Count; i++)
             {
-                Push(views[i], data);
+                if (CanPush(views[i]))
+                {
+                    views[i].UpdateData(data);
+                }
             }
         }
 
-        /// <summary>Hands the data to a live view that is not paused; reports a view destroyed from outside.</summary>
-        internal void Push<TData>(EntityView view, TData data) where TData : IComponentData
+        internal void PushBuffer<TElement>(Entity entity, DynamicBuffer<TElement> buffer) where TElement : unmanaged, IBufferElementData
+        {
+            if (_views.TryGetValue(entity, out var view) && CanPush(view))
+            {
+                view.UpdateBuffer(buffer);
+            }
+            if (_attachedCount == 0 || !_attached.TryGetValue(entity, out var views))
+            {
+                return;
+            }
+            for (var i = 0; i < views.Count; i++)
+            {
+                if (CanPush(views[i]))
+                {
+                    views[i].UpdateBuffer(buffer);
+                }
+            }
+        }
+
+        /// <summary>A live view that is not paused gets data; a view destroyed from outside is reported.</summary>
+        private bool CanPush(EntityView view)
         {
             if (view == null)
             {
                 RequestScan();
-                return;
+                return false;
             }
-            if (view.IsAutoUpdateEnabled)
-            {
-                view.UpdateData(data);
-            }
+            return view.IsAutoUpdateEnabled;
         }
 
         /// <summary>Detaches the views of entities that no longer exist and forgets attached views destroyed from outside.</summary>

@@ -16,6 +16,7 @@ namespace Pragma.Lockstep.Tests
         private readonly SystemBase _dataSystem;
         private readonly TestTimeViewUpdateSystem _timeSystem;
         private readonly TestViewHiddenUpdateSystem _hiddenSystem;
+        private readonly TestViewElementUpdateSystem _elementSystem;
         private readonly bool _isConfigRegistered;
 
         /// <param name="registerConfig">Registers the catalog of the two prefabs at runtime.</param>
@@ -30,6 +31,7 @@ namespace Pragma.Lockstep.Tests
                 : World.GetOrCreateSystemManaged<TestViewDataUpdateSystem>();
             _timeSystem = World.GetOrCreateSystemManaged<TestTimeViewUpdateSystem>();
             _hiddenSystem = World.GetOrCreateSystemManaged<TestViewHiddenUpdateSystem>();
+            _elementSystem = World.GetOrCreateSystemManaged<TestViewElementUpdateSystem>();
 
             PrefabA = CreatePrefab("TestA view");
             PrefabB = CreatePrefab("TestB view");
@@ -49,7 +51,10 @@ namespace Pragma.Lockstep.Tests
         public EntityView PrefabB { get; }
         public EntityViewConfig Config { get; }
 
-        /// <summary>A view prefab (an inactive template object) with a transform part, both test data parts, a time part and a tag part.</summary>
+        /// <summary>
+        /// A view prefab (an inactive template object) with a transform part, both test data parts, a time part, a tag part and
+        /// a buffer part.
+        /// </summary>
         public static EntityView CreatePrefab(string name)
         {
             var gameObject = new GameObject(name);
@@ -60,6 +65,7 @@ namespace Pragma.Lockstep.Tests
             gameObject.AddComponent<TestViewDataRawView>();
             gameObject.AddComponent<TestTimeView>();
             gameObject.AddComponent<TestViewHiddenView>();
+            gameObject.AddComponent<TestViewElementView>();
             return view;
         }
 
@@ -76,6 +82,7 @@ namespace Pragma.Lockstep.Tests
             _dataSystem.Update();
             _timeSystem.Update();
             _hiddenSystem.Update();
+            _elementSystem.Update();
         }
 
         /// <summary>A frame in which only the manager system ran, as if the update systems were disabled.</summary>

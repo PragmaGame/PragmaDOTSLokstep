@@ -166,6 +166,23 @@ namespace Pragma.Lockstep.Views
             }
         }
 
+        /// <summary>Hands <paramref name="buffer"/> to every part that shows the buffer of <typeparamref name="TElement"/>.</summary>
+        public void UpdateBuffer<TElement>(DynamicBuffer<TElement> buffer) where TElement : unmanaged, IBufferElementData
+        {
+            EnsureInitialized();
+            if (!_componentViews.TryGetValue(typeof(TElement), out var views))
+            {
+                return;
+            }
+            for (var i = 0; i < views.Count; i++)
+            {
+                if (views[i] is IEntityBufferView<TElement> typed)
+                {
+                    typed.UpdateData(buffer);
+                }
+            }
+        }
+
         /// <summary>
         /// Reads the current <typeparamref name="T"/> of the entity shown straight from the simulation world, for values
         /// no part is fed: the <see cref="LockstepEntityId"/> a command about this entity needs, a limit read once in
@@ -187,6 +204,23 @@ namespace Pragma.Lockstep.Views
             {
                 data = world.EntityManager.GetComponentData<T>(Entity);
             }
+            return true;
+        }
+
+        /// <summary>
+        /// Reads the current buffer of <typeparamref name="TElement"/> of the entity shown straight from the simulation
+        /// world, for a panel that shows it on demand. The buffer is read-only and valid until the simulation steps again.
+        /// </summary>
+        /// <returns>False while the view is not bound or when the entity has no such buffer.</returns>
+        public bool TryGetBuffer<TElement>(out DynamicBuffer<TElement> buffer) where TElement : unmanaged, IBufferElementData
+        {
+            buffer = default;
+            var world = Client?.Simulation?.World;
+            if (world == null || !world.IsCreated || !world.EntityManager.HasBuffer<TElement>(Entity))
+            {
+                return false;
+            }
+            buffer = world.EntityManager.GetBuffer<TElement>(Entity, true);
             return true;
         }
 

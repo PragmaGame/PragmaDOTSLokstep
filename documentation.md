@@ -285,14 +285,36 @@ These came up while building on Entities; neither reference package deals with t
 
 13. **Stats as buffers with change versions.** Upgrades, research, abilities and auras all change numbers of units,
     and patching component fields by hand loses track of who changed what and leaves no way to end an effect. Each
-    entity keeps base values and modifiers in two buffers; the game names its stats with its own ids, so the package
-    knows no stat list and an entity carries only the stats it has. Modifiers are removed by their source (an effect
-    that ends or is applied again takes all of its modifiers along) or by an end tick, which keeps timed effects in the
-    simulation state instead of in timers. The stat system recalculates only the chunks whose buffers changed, by
-    change versions, and writes stats only then, so systems that apply a stat to another component wake only when it
-    changed. Versions are allowed to decide this because a recalculation is idempotent: a chunk recalculated without
-    need gets the same bytes, so the state never depends on how versions advance on a machine (a late joiner replaying
-    many ticks per frame included).
+    entity keeps its stats and their modifiers in buffers; the game names its stats with its own ids (an enum, which
+    the helpers convert), so the package knows no stat list and an entity carries only the stats it has. Modifiers are
+    removed by their source (an effect that ends or is applied again takes all of its modifiers along) or by an end
+    tick, which keeps timed effects in the simulation state instead of in timers. The stat system recalculates only the
+    chunks where something changed, by change versions, and writes stats only then, so systems that apply a stat to
+    another component wake only when it changed. Versions are allowed to decide this because a recalculation is
+    idempotent: a chunk recalculated without need gets the same bytes, so the state never depends on how versions
+    advance on a machine (a late joiner replaying many ticks per frame included). Further choices, made for strategy
+    games (Dawn of War style research, squads, auras):
+    - **Attributes and resources.** Health is not a component next to the stats but a resource stat capped by the max
+      health attribute: health, morale, energy and money share one pool rule (never below zero, capped, fitted when the
+      cap changes by keeping the share or the amount) and one way to change them, one-tick `LockstepStatChange`s summed
+      per tick, so the result never depends on the order attackers were processed in. Modifiers apply to attributes
+      only, which keeps "a buff to current health" meaningless rather than surprising.
+    - **Grants instead of copies.** A research applies to all units of a type, including those built later, and a
+      squad ability to every member, reinforcements included. Copying modifiers into each unit would make every spawn
+      path know every effect; instead the player or squad entity holds `LockstepStatGrant`s and receivers name it in
+      `LockstepStatGrantor`, so the stat system reads the grants while recalculating and a receiver created later gets
+      them in place. Receivers of a grantor recalculate when its chunk's grants changed. The link is an `Entity`
+      reference, not a `LockstepEntityId`, because ids are assigned at the end of the creation tick and a squad and its
+      members are created together; the checksum hashes `Entity` fields by their target, and the reference is never
+      sorted, hashed or sent.
+    - **Non-stacking by source kind.** Two leaders with the same aura must not double it, and choosing the strongest at
+      the applier would need every aura system to track its rivals. A `Strongest` modifier competes with the others of
+      its stat, type and source kind, own and granted alike, and the strongest one applies.
+    - **Percentages stop at zero.** A factor below zero flips the sign of an attribute: a 60 % and a 50 % slow summed as
+      additive shares would make a speed negative, and two multiplicative -150 % debuffs would cancel out into a quarter
+      of the speed. Both percentage factors are floored at zero, so any pile of debuffs ends at zero. The flat part and
+      the result are not floored: negative armor or regeneration are legitimate values, and a game that needs other
+      bounds clamps where it reads the stat.
 
 ## Limitations and future work
 

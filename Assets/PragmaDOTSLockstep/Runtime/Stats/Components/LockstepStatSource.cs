@@ -3,14 +3,15 @@ using System;
 namespace Pragma.Lockstep.Stats
 {
     /// <summary>
-    /// What applied a <see cref="LockstepStatModifier"/>. The modifiers of one source are removed together
-    /// (<see cref="LockstepStats.RemoveModifiers"/>), so an effect that ends, or is applied again, takes all of its modifiers
-    /// along.
+    /// What applied a <see cref="LockstepStatModifier"/>, a <see cref="LockstepStatGrant"/> or a <see cref="LockstepStatChange"/>.
+    /// The modifiers of one source are removed together (<see cref="LockstepStats.RemoveModifiers"/>), so an effect that
+    /// ends, or is applied again, takes all of its modifiers along.
     /// </summary>
     /// <remarks>
     /// The game picks both numbers: <see cref="kind"/> for the kind of effect (an ability, a research, an aura, cover) and
-    /// <see cref="id"/> for which one or whose (the ability's index, the caster's <see cref="LockstepEntityId"/>). Two effects
-    /// with the same source do not stack: applying one replaces the other.
+    /// <see cref="id"/> for which one or whose (the ability's index, the caster's <see cref="LockstepEntityId"/>). Applying
+    /// an effect again after removing its source replaces it; <see cref="LockstepStatStacking.Strongest"/> modifiers of one
+    /// kind from different sources do not add up either.
     /// </remarks>
     public struct LockstepStatSource : IEquatable<LockstepStatSource>
     {

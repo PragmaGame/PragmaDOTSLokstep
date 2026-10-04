@@ -1,6 +1,6 @@
 ---
 name: pragma-lockstep-gameplay
-description: Write deterministic gameplay for Pragma DOTS Lockstep (package com.pragma.dotslockstep, namespace Pragma.Lockstep) - simulation systems in LockstepSimulationSystemGroup, per-tick input structs and commands, player join/leave, spawning entities and registry prefabs, LockstepEntityId references, navigation and pathfinding around obstacles (LockstepNavGrid, LockstepNavObstacle, LockstepNavAgent, LockstepPathfinder), stats with flat, additive and multiplicative modifiers, timed buffs and debuffs (LockstepStat, LockstepStatModifier, LockstepStatSystem), fixed-point math (FixedPoint, FixedVector2, FixedVector3, FixedQuaternion, FixedMath, FixedRandom) and presenting the simulation with interpolation and GameObject views (EntityView, EntityViewKey, EntityComponentView, EntityViewUpdateSystem, view catalogs and pools, ported from ECV). Use it whenever you add or change anything that runs inside a lockstep simulation world or reads it for rendering - units, movement, combat, abilities, economy, AI, timers, randomness, input handling, views, UI - even if the user never says "deterministic" or "lockstep".
+description: Write deterministic gameplay for Pragma DOTS Lockstep (com.pragma.dotslockstep, Pragma.Lockstep) - simulation systems in LockstepSimulationSystemGroup, input structs and commands, player join/leave, spawning, LockstepEntityId references, grid navigation (LockstepNavGrid, LockstepNavAgent, LockstepPathfinder), stats (attributes with timed or non-stacking modifiers, resources such as health with damage, healing and caps, research and squad bonuses granted to groups: LockstepStat, LockstepStatModifier, LockstepStatChange, LockstepStatGrant), fixed-point math (FixedPoint, FixedVector3, FixedMath, FixedRandom) and presenting it with interpolation and GameObject views (EntityView, EntityComponentView, EntityBufferView, update systems, catalogs, pools). Use it whenever you add or change anything that runs inside a lockstep simulation world or reads it for rendering - units, movement, combat, abilities, economy, AI, timers, randomness, input, views, UI - even if the user never says "deterministic" or "lockstep".
 ---
 
 # Gameplay with Pragma DOTS Lockstep
@@ -282,21 +282,34 @@ Units that walk around obstacles use `Pragma.Lockstep.Navigation` (assembly refe
 
 ## Stats
 
-Numbers that upgrades, research, abilities, auras or cover change (health, speed, damage, range) are stats of
-`Pragma.Lockstep.Stats` (assembly reference `Pragma.Lockstep.Stats`), not fields that systems patch by hand:
+Numbers that upgrades, research, abilities, auras or cover change (max health, speed, damage, range), and amounts that
+gameplay spends and refills (health, morale, energy, money), are stats of `Pragma.Lockstep.Stats` (assembly reference
+`Pragma.Lockstep.Stats`), not fields that systems patch by hand:
 
-- **Data.** The game names its stats with an enum cast to `int`. An entity bakes a `LockstepStat` buffer
-  (`LockstepStat.Create(type, baseValue)`) and a `LockstepStatModifier` buffer, empty or not: without it the entity is
-  not updated.
-- **Modifiers.** `LockstepStatModifier.Flat`, `Additive` (shares summed), `Multiplicative` (times 1 + value, stacking),
-  each with a `LockstepStatSource` (kind, id) and an optional `endTick` (`time.tick + durationTicks`). Add them in
-  systems with `[UpdateBefore(typeof(LockstepStatSystem))]`; `LockstepStats.RemoveModifiers(modifiers, source)` ends an
-  effect, and removing before adding again refreshes it instead of stacking.
-- **Reading.** `LockstepStats.TryGetValue(stats, type, out value)` in systems with
-  `[UpdateAfter(typeof(LockstepStatSystem))]`. Apply a stat to another component (agent speed, max health) in an
-  `IJobEntity` with `[WithChangeFilter(typeof(LockstepStat))]` and `in DynamicBuffer<LockstepStat>`: the stat system
-  writes stats only when they change, and a read-write access would make it recalculate them every tick.
-- **Base values.** `LockstepStats.TrySetBase` for permanent changes (a level up); the value follows in the next update.
+- **Data.** The game names its stats with an enum (0 = none); the factories and helpers take the enum itself. An entity
+  bakes a `LockstepStat` buffer of attributes (`LockstepStat.Attribute(type, baseValue)`) and resources
+  (`LockstepStat.Resource(type, amount)`, or `Resource(type, capAttribute, LockstepStatCapPolicy.KeepRatio)`, which
+  starts full), plus the empty buffers it takes part in: `LockstepStatModifier`, `LockstepStatChange`,
+  `LockstepStatGrantor`, `LockstepStatTarget`.
+- **Modifiers (attributes).** `LockstepStatModifier.Flat`, `AdditivePercent` (shares summed), `MultiplicativePercent`
+  (times 1 + value, stacking); the percentage factors stop at 0, so -100 % zeroes an attribute and debuffs never flip
+  its sign, while `Flat` may push it below 0. Each modifier comes with a `LockstepStatSource` (kind, id), an optional
+  `endTick` (`time.tick + durationTicks`) and a `stacking` rule (`Strongest`: one aura of a kind counts once, the
+  strongest). Add them in systems with `[UpdateBefore(typeof(LockstepStatSystem))]`; `modifiers.RemoveModifiers(source)`
+  ends an effect, and removing before adding again refreshes it instead of stacking.
+- **Changes (resources).** Damage, healing, income and payments are `LockstepStatChange.Create(stat, amount, source)`
+  added before `LockstepStatSystem`: the tick's changes are summed, the amount stays within 0 and the cap, the buffer is
+  cleared. Never write a resource's `value` by hand.
+- **Grants (groups).** Research or a squad ability goes into the `LockstepStatGrant` buffer of the player's or squad's
+  entity with a `target` (`ANY` or a `LockstepStatTarget` of the receivers); every entity whose `LockstepStatGrantor`
+  names that entity gets it, also the ones created later. Name the grantor where the unit is created.
+- **Reading.** `stats.TryGet(StatType.Health, out var health)` (`value`, and `max` for a capped resource) or
+  `stats.TryGetValue(type, out value)` in systems with `[UpdateAfter(typeof(LockstepStatSystem))]`. Apply a stat to
+  another component (agent speed) in an `IJobEntity` with `[WithChangeFilter(typeof(LockstepStat))]` and
+  `in DynamicBuffer<LockstepStat>`: the stat system writes stats only when they change, and a read-write access would
+  make it recalculate them every tick. Views show stats with an `EntityBufferView<LockstepStat>` part.
+- **Base values.** `stats.TrySetBase` for permanent changes of an attribute (a level up); the value follows in the next
+  update.
 
 ## Burst and jobs
 

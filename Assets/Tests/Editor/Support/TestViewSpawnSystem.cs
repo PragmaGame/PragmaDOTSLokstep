@@ -5,9 +5,10 @@ using Unity.Entities;
 namespace Pragma.Lockstep.Tests
 {
     /// <summary>
-    /// A timeline for the view tests. Tick 3: an entity with key A at x = 10 (moving +1 every tick). Tick 8: its
-    /// <see cref="TestViewHidden"/> turns on, tick 12: off again. Ticks 10 and 20: its data becomes 1, then 2. Tick 25:
-    /// its key becomes B. Tick 30: it is destroyed. Tick 33: a second key A entity with data 2. Tick 40: it is destroyed.
+    /// A timeline for the view tests. Tick 3: an entity with key A at x = 10 (moving +1 every tick) and the
+    /// <see cref="TestViewElement"/>s [1]. Tick 8: its <see cref="TestViewHidden"/> turns on, tick 12: off again. Ticks 10
+    /// and 20: its data becomes 1, then 2. Tick 15: its elements become [1, 2]. Tick 25: its key becomes B. Tick 30: it is
+    /// destroyed. Tick 33: a second key A entity with data 2 and the elements [3]. Tick 40: it is destroyed.
     /// </summary>
     [UpdateInGroup(typeof(LockstepSimulationSystemGroup))]
     public partial struct TestViewSpawnSystem : ISystem
@@ -21,12 +22,13 @@ namespace Pragma.Lockstep.Tests
             var query = SystemAPI.QueryBuilder().WithAll<TestViewData>().Build();
             if (tick == 3 || tick == 33)
             {
-                var entity = state.EntityManager.CreateEntity(
-                    typeof(EntityViewKey), typeof(LockstepTransform), typeof(LockstepTransformPrevious), typeof(TestViewData), typeof(TestViewHidden));
+                var entity = state.EntityManager.CreateEntity(typeof(EntityViewKey), typeof(LockstepTransform), typeof(LockstepTransformPrevious),
+                    typeof(TestViewData), typeof(TestViewHidden), typeof(TestViewElement));
                 state.EntityManager.SetComponentData(entity, new EntityViewKey(KEY_A));
                 state.EntityManager.SetComponentData(entity, LockstepTransform.FromPosition(new FixedVector3(10, 0, 0)));
                 state.EntityManager.SetComponentData(entity, new TestViewData { value = tick == 3 ? 0 : 2 });
                 state.EntityManager.SetComponentEnabled<TestViewHidden>(entity, false);
+                state.EntityManager.GetBuffer<TestViewElement>(entity).Add(new TestViewElement { value = tick == 3 ? 1 : 3 });
             }
 
             // Read-only access to TestViewData, so only the writes below change its version.
@@ -43,6 +45,10 @@ namespace Pragma.Lockstep.Tests
             {
                 var entity = query.GetSingletonEntity();
                 state.EntityManager.SetComponentData(entity, new TestViewData { value = tick == 10 ? 1 : 2 });
+            }
+            if (tick == 15)
+            {
+                state.EntityManager.GetBuffer<TestViewElement>(query.GetSingletonEntity()).Add(new TestViewElement { value = 2 });
             }
             if (tick == 25)
             {

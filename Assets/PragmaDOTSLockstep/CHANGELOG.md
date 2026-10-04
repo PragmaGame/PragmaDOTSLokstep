@@ -9,17 +9,18 @@ and this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - GameObject views (`Pragma.Lockstep.Views`), adapted from ECV (Entity Component View): `EntityView` prefabs with
-  one part per component type (`EntityComponentView<T>`, `EntityComponentViewUnmanaged<T>`, `TransformComponentView`),
-  spawned and returned by `EntityViewManagerSystem` for the simulation entities with an `EntityViewKey`, fed by
-  `EntityViewUpdateSystem<T>` when their component changes and by `TransformViewUpdateSystem` with interpolated
-  transforms. Nothing is written to the simulation world.
+  one part per component type (`EntityComponentView<T>`, `EntityComponentViewUnmanaged<T>`, `TransformComponentView`)
+  or dynamic buffer (`EntityBufferView<T>`), all deriving from `EntityViewPart`, spawned and returned by
+  `EntityViewManagerSystem` for the simulation entities with an `EntityViewKey`, fed by `EntityViewUpdateSystem<T>` and
+  `EntityBufferViewUpdateSystem<T>` when their component or buffer changes and by `TransformViewUpdateSystem` with
+  interpolated transforms. Nothing is written to the simulation world.
 - View catalogs: `EntityViewConfig`, baked with `EntityViewConfigAuthoring` (skipped for dedicated servers) or
   registered at runtime with `EntityViewConfigProvider` / `EntityViewConfigs`; `EntityViewKeyAuthoring` bakes keys.
 - Pool abstraction: `IEntityViewPool`, chosen per project with `EntityViewManagerSystem.PoolFactory` or per world with
   `EntityViewManagerSystem.Pool`; `EntityViewPool` is the default.
 - `EntityViewManager`: views by entity, `Attach`/`Detach` for views the caller owns (HUD panels), `ForceUpdate`.
-- `EntityView.TryGetData<T>`: reads a component of the entity shown from the simulation world (its `LockstepEntityId`
-  for commands).
+- `EntityView.TryGetData<T>` and `TryGetBuffer<T>`: read a component or a buffer of the entity shown from the
+  simulation world (its `LockstepEntityId` for commands).
 - `LockstepTransformExtensions.TryGetInterpolated`: reads and interpolates the transform of a simulation entity with the
   rule both view systems use.
 - The sample shows its avatars and projectiles with GameObject views.
@@ -35,11 +36,18 @@ and this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   blocks their way. `LockstepNavSystemGroup` runs `LockstepNavObstacleSystem`, `LockstepNavPathSystem` and
   `LockstepNavMoveSystem`; `LockstepNavGridAuthoring`, `LockstepNavObstacleAuthoring` and `LockstepNavAgentAuthoring`
   bake them, and selecting a grid previews the cells the obstacles block.
-- Stats (`Pragma.Lockstep.Stats`): a `LockstepStat` buffer of base values and values under the game's own stat ids, a
-  `LockstepStatModifier` buffer of flat, additive and multiplicative modifiers, each with a `LockstepStatSource` and an
-  optional end tick, and `LockstepStatSystem`, which removes expired modifiers and recalculates, in parallel and in
-  `FixedPoint`, only the chunks whose stats or modifiers changed. `LockstepStats` reads and changes them
-  (`TryGetValue`, `TryGetBase`, `TrySetBase`, `RemoveModifiers`, `Calculate`).
+- Stats (`Pragma.Lockstep.Stats`), under the game's own stat ids or enum values, in `FixedPoint`:
+  - attributes (`LockstepStat.Attribute`): a base value and `LockstepStatModifier`s, flat, additive or multiplicative
+    (percentage factors stop at zero), each with a `LockstepStatSource`, an optional end tick and a stacking rule
+    (`Strongest` applies only the strongest modifier of a kind);
+  - resources (`LockstepStat.Resource`): an amount changed by one-tick `LockstepStatChange`s (damage, healing, income),
+    never below zero, optionally capped by an attribute with a `LockstepStatCapPolicy` (`KeepRatio` or `Clamp`) and
+    starting full;
+  - grants: `LockstepStatGrant`s of an entity (a player, a squad) reach the entities whose `LockstepStatGrantor`
+    names it and whose `LockstepStatTarget`s match, the later ones included;
+  - `LockstepStatSystem` removes expired modifiers and grants and recalculates, in parallel, only the chunks where
+    something changed; `LockstepStats` reads and changes stats (`TryGet`, `TryGetValue`, `TryGetBase`, `TrySetBase`,
+    also with the game's enum), removes modifiers and grants by source and computes the formula.
 - Command data: besides its payload struct (still up to 122 bytes) a command carries data of any length, an array of
   any unmanaged element type, for lists such as the unit ids of an order. `LockstepCommand.Create(payload, data,
   dataBuffer)` writes it into the new `LockstepCommandData` buffer, which the local input entity and every player

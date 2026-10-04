@@ -164,15 +164,23 @@ Namespace and assembly `Pragma.Lockstep.Stats`.
 
 | Type | Members |
 |---|---|
-| `LockstepStat` | Buffer: `int type` (the game's stat id), `FixedPoint baseValue`, `FixedPoint value` (base with the modifiers applied); `Create(type, baseValue)`. Each stat once per entity |
-| `LockstepStatModifier` | Buffer: `int stat`, `LockstepStatModifierType type`, `FixedPoint value`, `LockstepStatSource source`, `int endTick` (`PERMANENT` = 0: until removed); `Flat`, `Additive`, `Multiplicative` factories `(stat, value, source = default, endTick = PERMANENT)`, `IsExpired(tick)` |
-| `LockstepStatModifierType` | `Flat` (adds), `Additive` (shares summed: 0.25 adds 25 %), `Multiplicative` (times 1 + value, stacking) |
-| `LockstepStatSource` | `uint kind`, `uint id`, equality. What applied a modifier; one source's modifiers are removed together |
-| `LockstepStatSystem` | In `LockstepSimulationSystemGroup`: removes expired modifiers, recalculates entities with both buffers whose chunk changed, writes `LockstepStat` only then |
-| `LockstepStats` | `TryGetValue(stats, type, out value)`, `TryGetBase`, `TrySetBase(stats, type, baseValue)`, `RemoveModifiers(modifiers, source)` (returns the count, keeps the order), `Calculate(type, baseValue, NativeArray<LockstepStatModifier>)` |
+| `LockstepStat` | Buffer: `int type` (the game's stat id, `NONE` = 0 is none), `LockstepStatKind kind` (`Attribute`, `Resource`), `FixedPoint value`; attributes: `FixedPoint baseValue`; resources: `int cap` (an attribute type or `NONE`), `LockstepStatCapPolicy capPolicy` (`KeepRatio`, `Clamp`), `FixedPoint max` (the cap fitted to, 0 before the first update). Factories `Attribute(type, baseValue)`, `Resource(type, amount)`, `Resource(type, cap, capPolicy)` (starts full), also with an enum type; `IsAttribute`, `IsResource`. Each stat once per entity |
+| `LockstepStatModifier` | Buffer, attributes only: `int stat`, `LockstepStatModifierType type`, `LockstepStatStacking stacking`, `FixedPoint value`, `LockstepStatSource source`, `int endTick` (`PERMANENT` = 0: until removed); `Flat`, `AdditivePercent`, `MultiplicativePercent` factories `(stat, value, source = default, endTick = PERMANENT, stacking = Stack)`, also with an enum stat; `IsExpired(tick)` |
+| `LockstepStatModifierType` | `Flat` (adds), `AdditivePercent` (shares summed: 0.25 adds 25 %, a sum of -1 or less gives 0), `MultiplicativePercent` (times 1 + value, stacking; -1 or less gives 0) |
+| `LockstepStatStacking` | `Stack`, `Strongest` (of the `Strongest` modifiers of an attribute with one type and source `kind`, only the largest absolute value applies, the first on a tie) |
+| `LockstepStatChange` | Buffer, resources only: `int stat`, `FixedPoint amount`, `LockstepStatSource source`; `Create(stat, amount, source = default)`, also with an enum stat. Applied and cleared by the next `LockstepStatSystem` update |
+| `LockstepStatGrant` | Buffer of a granting entity: `int target` (`ANY` = 0: every receiver), `LockstepStatModifier modifier`; `Create(modifier, target = ANY)`, also with an enum target |
+| `LockstepStatGrantor` | Buffer of a receiver: `Entity entity`, an entity whose grants it receives. Dropped by the stat system when the entity is gone |
+| `LockstepStatTarget` | Buffer of a receiver: `int value`, a group grants can target; `Create(enum)` |
+| `LockstepStatSource` | `uint kind`, `uint id`, equality. What applied a modifier, grant or change; one source's modifiers are removed together |
+| `LockstepStatSystem` | In `LockstepSimulationSystemGroup`: removes expired modifiers and grants, recalculates the chunks whose stats, modifiers, grantors or targets changed, whose grantors' grants changed or which have pending changes, writes `LockstepStat` only then |
+| `LockstepStats` | Extensions on `DynamicBuffer<LockstepStat>`, each with an `int` or enum type: `TryGet(type, out LockstepStat)`, `TryGetValue`, `TryGetBase`, `TrySetBase` (attributes only). `RemoveModifiers(modifiers, source)`, `RemoveGrants(grants, source)` (return the count, keep the order), `Calculate(type, baseValue, NativeArray<LockstepStatModifier>)`, `Id(enum)` |
 
-`value = (base + sum of Flat) * (1 + sum of Additive) * product of (1 + Multiplicative)`. A modifier ending on tick
-T + D was applied on ticks T to T + D - 1 when added on tick T before `LockstepStatSystem`.
+Attributes, over own modifiers and received grants:
+`value = (base + sum of Flat) * max(0, 1 + sum of AdditivePercent) * product of max(0, 1 + MultiplicativePercent)`; the
+percentage factors stop at 0, the flat part may go below. Resources: the tick's changes are summed, then the amount is
+kept within 0 and the cap; `KeepRatio` keeps the share when the cap changes, `Clamp` keeps the amount. A modifier or
+grant ending on tick T + D was applied on ticks T to T + D - 1 when added on tick T before `LockstepStatSystem`.
 
 ## Bytes helpers
 

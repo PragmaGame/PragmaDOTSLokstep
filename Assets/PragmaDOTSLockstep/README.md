@@ -71,8 +71,10 @@ It is a poor fit for:
   tells everybody which client diverged. A per-component breakdown shows what diverged.
 - **Navigation.** A walkability grid, obstacles that block it while their entity exists, A* with string pulling in
   integer math and agents that walk the paths in `FixedPoint`, planning again when obstacles change.
-- **Stats.** Base values and flat, additive and multiplicative modifiers in `FixedPoint`, timed or lasting until
-  their source removes them, recalculated only where something changed.
+- **Stats.** Attributes with flat, additive and multiplicative modifiers (timed or lasting until their source removes
+  them, stacking or not) and resources capped by an attribute, changed by one-tick changes such as damage; modifiers a
+  player or a squad grants to all of its units, the later ones included. In `FixedPoint`, recalculated only where
+  something changed.
 - **Late join.** A player joining a running match re-simulates it from tick 0 while new frames keep streaming in.
 - **Replays.** Export from a client or the server and play back with checksum verification.
 - **Offline mode.** The same protocol over an in-process loopback: single player exercises the complete code path.
@@ -115,7 +117,7 @@ Reference the assemblies you use from your assembly definitions:
 | `Pragma.Lockstep.Mathematics` | `FixedPoint`, vectors, quaternion, `FixedMath`, `FixedRandom`; no Entities dependency | simulation and presentation code |
 | `Pragma.Lockstep` | Protocol, simulation world, components, checksums, replays, offline mode, presentation helpers | simulation and presentation code |
 | `Pragma.Lockstep.Navigation` | The walkability grid, obstacles, agents, `LockstepPathfinder` and the navigation systems | simulation code |
-| `Pragma.Lockstep.Stats` | Stats and their modifiers, `LockstepStatSystem` and the `LockstepStats` helpers | simulation code, and presentation code that shows stats |
+| `Pragma.Lockstep.Stats` | Attributes, resources, modifiers, changes and grants, `LockstepStatSystem` and the `LockstepStats` helpers | simulation code, and presentation code that shows stats |
 | `Pragma.Lockstep.Views` | GameObject views: `EntityView`, view parts, `EntityViewKey`, the view manager, catalogs, the pool abstraction | presentation code, and simulation code that sets an `EntityViewKey` |
 | `Pragma.Lockstep.Netcode` | Netcode for Entities RPC and the server and client systems | bootstrap code |
 | `Pragma.Lockstep.Authoring` | Bakers for transforms, the prefab registry, scene entities, entity ids, view catalogs and view keys | authoring code, if any |
@@ -788,35 +790,46 @@ Pick the cell size from the narrowest gap units must pass: about the agent radiu
 
 ## Stats
 
-`Pragma.Lockstep.Stats` keeps the numbers that upgrades, research, abilities and auras change: health, speed, damage,
-range. An entity has base values and a list of modifiers, and a system recalculates the values in `FixedPoint` when
-either of them changes.
+`Pragma.Lockstep.Stats` keeps the numbers of entities in `FixedPoint`: *attributes* that upgrades, research, abilities
+and auras change (max health, speed, damage, range) and *resources* that gameplay spends and refills (health, morale,
+energy, a player's money). One system applies the modifiers, the grants an entity inherits and the one-tick changes, and
+recalculates only what changed.
 
 | Type | What it is |
 |---|---|
-| `LockstepStat` | Buffer element: one stat of the entity, its `type` (an id the game defines, usually an enum cast to `int`), `baseValue` and `value`, the base with the modifiers applied |
-| `LockstepStatModifier` | Buffer element: the `stat` it changes, its `type` (`Flat`, `Additive`, `Multiplicative`) and `value`, its `source` and `endTick` (`PERMANENT` by default) |
-| `LockstepStatSource` | What applied a modifier: two numbers the game picks (`kind`, `id`). The modifiers of one source are removed together |
-| `LockstepStatSystem` | In `LockstepSimulationSystemGroup`: removes the modifiers whose end tick has come and recalculates the stats of the entities whose base values or modifiers changed |
-| `LockstepStats` | `TryGetValue`, `TryGetBase`, `TrySetBase`, `RemoveModifiers`, `Calculate` (the formula, for tooltips and previews) |
+| `LockstepStat` | Buffer element: one stat of the entity. Its `type` (an id the game defines, usually an enum value; 0 is `NONE`), `kind` (`Attribute` or `Resource`) and `value`; an attribute's `baseValue`; a resource's `cap` (the attribute that caps it), `capPolicy` and `max` (the cap it was fitted to). Made with `LockstepStat.Attribute` and `LockstepStat.Resource` |
+| `LockstepStatModifier` | Buffer element: a change to an attribute. Its `stat`, `type` (`Flat`, `AdditivePercent`, `MultiplicativePercent`), `value`, `stacking` (`Stack` or `Strongest`), `source` and `endTick` (`PERMANENT` by default) |
+| `LockstepStatChange` | Buffer element: a one-tick change of a resource (`stat`, `amount`, `source`): damage, healing, income, a payment |
+| `LockstepStatGrant` | Buffer element of an entity that gives modifiers to the entities inheriting from it: the `modifier` and the `target` a receiver needs (`ANY` for every receiver) |
+| `LockstepStatGrantor` | Buffer element: an entity whose grants this one receives (its player, its squad, the unit carrying it) |
+| `LockstepStatTarget` | Buffer element: a group the entity belongs to for grants (its type, its category) |
+| `LockstepStatSource` | What applied a modifier, a grant or a change: two numbers the game picks (`kind`, `id`) |
+| `LockstepStatSystem` | In `LockstepSimulationSystemGroup`: removes expired modifiers and grants, recalculates the attributes whose base values, modifiers or grants changed, fits resources to their caps and applies the tick's changes |
+| `LockstepStats` | Extensions on the stat buffer, also taking the game's enum: `TryGet`, `TryGetValue`, `TryGetBase`, `TrySetBase`; `RemoveModifiers`, `RemoveGrants`, `Calculate` (the formula, for tooltips and previews), `Id` |
 
 ### Setting it up
 
-Name the stats with an enum of your own and bake both buffers onto the entities that have stats; the modifier buffer
-may stay empty, but without it the entity is not updated:
+Name the stats with an enum of your own and bake the buffers an entity needs: `LockstepStat`, plus
+`LockstepStatModifier`, `LockstepStatChange`, `LockstepStatGrantor` and `LockstepStatTarget` for what it takes part in.
+Empty buffers cost nothing, and gameplay fills them without structural changes:
 
 ```csharp
-public enum StatType { MaxHealth = 1, Speed = 2 }
+public enum StatType { None = 0, MaxHealth = 1, Speed = 2, Health = 3 }
+public enum StatTarget { Any = 0, Infantry = 1, Vehicle = 2 }
 
 // In a baker:
 var stats = AddBuffer<LockstepStat>(entity);
-stats.Add(LockstepStat.Create((int)StatType.MaxHealth, (FixedPoint)authoring.maxHealth));
-stats.Add(LockstepStat.Create((int)StatType.Speed, (FixedPoint)authoring.speed));
+stats.Add(LockstepStat.Attribute(StatType.MaxHealth, (FixedPoint)authoring.maxHealth));
+stats.Add(LockstepStat.Attribute(StatType.Speed, (FixedPoint)authoring.speed));
+stats.Add(LockstepStat.Resource(StatType.Health, StatType.MaxHealth, LockstepStatCapPolicy.KeepRatio)); // starts full
 AddBuffer<LockstepStatModifier>(entity);
+AddBuffer<LockstepStatChange>(entity);
+AddBuffer<LockstepStatGrantor>(entity);
+AddBuffer<LockstepStatTarget>(entity).Add(LockstepStatTarget.Create(StatTarget.Infantry));
 ```
 
-Change modifiers in systems that update before `LockstepStatSystem` and read values in systems after it, and both
-happen on the same tick:
+Change stats in systems that update before `LockstepStatSystem` and read them in systems after it, and both happen on
+the same tick:
 
 ```csharp
 [UpdateInGroup(typeof(LockstepSimulationSystemGroup))]
@@ -830,11 +843,19 @@ public partial struct SprintSystem : ISystem
         foreach (var modifiers in SystemAPI.Query<DynamicBuffer<LockstepStatModifier>>().WithAll<SprintRequest>())
         {
             // Applied again, the effect is refreshed instead of stacking.
-            LockstepStats.RemoveModifiers(modifiers, source);
-            modifiers.Add(LockstepStatModifier.Additive((int)StatType.Speed, FixedPoint.Half, source, time.tick + 5 * time.tickRate));
+            modifiers.RemoveModifiers(source);
+            modifiers.Add(LockstepStatModifier.AdditivePercent(StatType.Speed, FixedPoint.Half, source, time.tick + 5 * time.tickRate));
         }
     }
 }
+
+// Damage, from a system before LockstepStatSystem: a one-tick change of the target's health.
+changes.Add(LockstepStatChange.Create(StatType.Health, -damage, new LockstepStatSource((uint)EffectKind.Shot, attackerId)));
+
+// Research: one grant on the player's entity reaches all of its infantry, also the units made later...
+grants.Add(LockstepStatGrant.Create(LockstepStatModifier.AdditivePercent(StatType.MaxHealth, FixedPoint.Half, research), StatTarget.Infantry));
+// ...because every unit of the player names that entity where the unit is created.
+grantors.Add(new LockstepStatGrantor(playerEntity));
 
 [UpdateInGroup(typeof(LockstepSimulationSystemGroup))]
 [UpdateAfter(typeof(LockstepStatSystem))]
@@ -852,7 +873,7 @@ public partial struct SpeedStatSystem : ISystem
         // Read with `in`: writing the stats would mark them changed and make LockstepStatSystem recalculate them every tick.
         private void Execute(ref LockstepNavAgent agent, in DynamicBuffer<LockstepStat> stats)
         {
-            if (LockstepStats.TryGetValue(stats, (int)StatType.Speed, out var speed))
+            if (stats.TryGetValue(StatType.Speed, out var speed))
             {
                 agent.speed = speed;
             }
@@ -863,18 +884,42 @@ public partial struct SpeedStatSystem : ISystem
 
 ### Behaviour
 
-- **Formula.** `value = (base + sum of Flat) * (1 + sum of Additive) * product of (1 + Multiplicative)`. Additive
-  values are shares that add up (0.25 and 0.15 make +40 %); multiplicative ones stack on each other (0.5 and 0.5 make
-  2.25 times). A modifier of a stat the entity does not have changes nothing.
-- **Timed modifiers.** `endTick` is the tick the modifier is removed on: added on tick T for D ticks, it ends on T + D
-  and applies from T to T + D - 1. Durations are ticks: `seconds * time.tickRate`.
-- **Sources.** `RemoveModifiers` removes every modifier of a source and keeps the order of the others. Removing a source
-  before adding its modifiers again refreshes an effect instead of stacking it.
-- **Base values.** `TrySetBase` changes a base value (a level up); the value follows in the next stat update.
-- **When values change.** `LockstepStatSystem` decides per chunk, by the change versions of the two buffers, whether to
-  recalculate, and writes the stats only then, so systems that follow a stat can use a change filter on
-  `LockstepStat`. A recalculation gives the same values however often it runs, so the state never depends on the
-  versions themselves.
+- **Attributes.** Over the entity's own modifiers and the grants it receives,
+  `value = (base + sum of Flat) * max(0, 1 + sum of AdditivePercent) * product of max(0, 1 + MultiplicativePercent)`.
+  `AdditivePercent` values are shares that add up (0.25 and 0.15 make +40 %); `MultiplicativePercent` ones stack on each
+  other (0.5 and 0.5 make 2.25 times, -0.5 halves). The percentage factors stop at zero: -100 % or less makes the
+  attribute zero, and two factors below zero never cancel out into a buff. The flat part may go below zero (negative
+  armor or regeneration). A modifier of a resource, or of a stat the entity does not have, changes nothing.
+- **Non-stacking modifiers.** Of the `Strongest` modifiers of an attribute with the same type and source `kind`, only
+  the one with the largest absolute value applies (the first one on a tie), own modifiers and grants alike: two leaders
+  with the same aura give its bonus once.
+- **Resources.** The changes of a resource on one tick are summed, then the amount is kept between zero and its cap, so
+  the result does not depend on the order the changes were added in. A change of an attribute changes nothing. Until
+  `LockstepStatSystem` runs, the buffer lists the tick's changes with their sources, for whatever needs to know who
+  dealt the damage.
+- **Caps.** A resource follows the attribute named in `cap` as that attribute is on the same tick. `KeepRatio` keeps
+  the share (80 of 100 becomes 120 of 150, and 80 of 100 again), so a bonus to the maximum neither heals nor wounds;
+  `Clamp` keeps the amount and cuts it down to a lower cap. A capped resource starts full, under the modifiers of its cap,
+  and so does one whose cap was zero; `max` is the cap it was fitted to, the maximum a bar shows. Without its cap
+  attribute a resource is uncapped.
+- **Grants.** A grant reaches every entity whose `LockstepStatGrantor` buffer names the granting entity and whose
+  `LockstepStatTarget`s include the grant's `target` (any entity, for `ANY`). Adding, removing or expiring a grant
+  updates every receiver on the same tick, and an entity that starts inheriting later gets the grants in place. A
+  grantor that no longer exists is dropped from the buffer, and with it what it gave. `LockstepStatGrantor` holds an
+  `Entity`: a reference inside the simulation world, which the checksum hashes by its target; never sort by it, hash it
+  or send it.
+- **Timed modifiers and grants.** `endTick` is the tick they are removed on: added on tick T for D ticks, they end on
+  T + D and apply from T to T + D - 1. Durations are ticks: `seconds * time.tickRate`.
+- **Sources.** `RemoveModifiers` and `RemoveGrants` remove everything of a source and keep the order of the rest.
+  Removing a source before adding its modifiers again refreshes an effect instead of stacking it.
+- **Base values.** `TrySetBase` changes an attribute's base value (a level up); the value follows in the next stat
+  update.
+- **Enums.** The factories and the read and write helpers take the game's enum and store its value
+  (`LockstepStats.Id`), in Burst too.
+- **When values change.** `LockstepStatSystem` decides per chunk, by change versions, whether to recalculate: its stat,
+  modifier, grantor and target buffers, the grants in the chunks of its grantors, pending changes and expiring
+  modifiers. It writes the stats only then, so systems that follow a stat can use a change filter on `LockstepStat`. A
+  recalculation gives the same values however often it runs, so the state never depends on the versions themselves.
 - **Determinism.** Integer and `FixedPoint` math only; chunks are processed in parallel and each writes only its own
   entities.
 
@@ -1031,11 +1076,34 @@ Graphics does not draw well: animators, VFX, health bars, selection rings, world
    cached value when a pooled view is bound to another entity. Several parts may show the same type. A part reaches its
    root through `View`: `View.Entity`, `View.Client.LocalSlot`.
 
+   A dynamic buffer (the stats, a production queue) is shown by an `EntityBufferView<T>` part. Its
+   `UpdateData(DynamicBuffer<T>)` gets the buffer itself, read-only and valid only during the call; it runs whenever the
+   chunk's buffer was written, so compare what the part shows before redrawing:
+
+   ```csharp
+   public sealed class HealthBarView : EntityBufferView<LockstepStat>
+   {
+       [SerializeField] private Transform _fill;
+
+       public override void UpdateData(DynamicBuffer<LockstepStat> stats)
+       {
+           if (stats.TryGet(StatType.Health, out var health) && health.max > FixedPoint.Zero)
+           {
+               _fill.localScale = new Vector3((float)health.value / (float)health.max, 1f, 1f);
+           }
+       }
+   }
+   ```
+
 3. **Push the component type.** One empty system per type, in any assembly (its presentation filter keeps it out of
-   simulation worlds):
+   simulation worlds), and one per buffer element type for buffer parts:
 
    ```csharp
    public partial class HealthViewUpdateSystem : EntityViewUpdateSystem<Health>
+   {
+   }
+
+   public partial class StatViewUpdateSystem : EntityBufferViewUpdateSystem<LockstepStat>
    {
    }
    ```
@@ -1067,8 +1135,8 @@ simulation world, not even a cleanup component, so views cannot cause desyncs.
 | `manager.ForceUpdate(entity)` | Push every value of the entity again at the next update |
 | `view.Entity`, `view.Client`, `view.IsBound`, `view.IsAttached` | What a view shows |
 | `view.IsAutoUpdateEnabled` | Pause the pushes, transform included; turning it back on catches up |
-| `view.TryGetData<T>(out data)` | Read any component of the entity from the simulation world, such as its `LockstepEntityId` |
-| `view.GetComponentView<T>()`, `view.SetComponentViewEnable<T>(bool)`, `view.UpdateData(data)` | Reach or drive the parts by hand |
+| `view.TryGetData<T>(out data)`, `view.TryGetBuffer<T>(out buffer)` | Read any component or buffer of the entity from the simulation world, such as its `LockstepEntityId` |
+| `view.GetComponentView<T>()`, `view.SetComponentViewEnable<T>(bool)`, `view.UpdateData(data)`, `view.UpdateBuffer(buffer)` | Reach or drive the parts by hand |
 | `view.RefreshComponentViews()` | Collect the parts again after adding some at runtime |
 
 `Entity` values work as keys only in this process and session. To send a command about the unit under the cursor,
@@ -1443,7 +1511,7 @@ that form and relays the bytes without decoding them.
 | `Runtime/Transforms` | `LockstepTransform`, `LockstepTransformPrevious`, transform history |
 | `Runtime/Client` | Local input, `LockstepWorlds`, offline mode, prefab registry copy, `LockstepViewSystem` |
 | `Runtime/Navigation` | `Pragma.Lockstep.Navigation`: the grid, obstacles, agents, `LockstepPathfinder`, the navigation systems |
-| `Runtime/Stats` | `Pragma.Lockstep.Stats`: stats and modifiers, `LockstepStatSystem`, `LockstepStats` |
+| `Runtime/Stats` | `Pragma.Lockstep.Stats`: attributes and resources, modifiers, changes and grants, `LockstepStatSystem`, `LockstepStats` |
 | `Runtime/Views` | `Pragma.Lockstep.Views`: GameObject views (`EntityView`, view parts, `EntityViewManagerSystem`, update systems, catalogs, the pool) |
 | `Runtime/Netcode` | `Pragma.Lockstep.Netcode`: the RPC, server and client systems, `LockstepNetcode` |
 | `Runtime/Netcode/Components` | `LockstepServerConfig`, `LockstepClientConfig`, `LockstepServerStatus`, start and end requests |
@@ -1496,7 +1564,8 @@ Copy-Item -Recurse -Force (Resolve-Path "Library/PackageCache/com.pragma.dotsloc
 | Agents do not move | The agent has no `LockstepTransform` or `LockstepNavWaypoint` buffer, its speed is zero, or the destination was set after `LockstepNavSystemGroup` updated (it starts on the next tick) |
 | Agents walk through an obstacle | The obstacle is not in the simulation world (a static map object needs `LockstepSceneEntityAuthoring`), lies outside the grid, or is thinner than a cell with an agent radius of zero |
 | Agents stop short of the destination | `isPathPartial`: the destination is blocked or walled in, and the path ends at the closest reachable point |
-| A stat keeps its old value | The entity has no `LockstepStatModifier` buffer (the stat system updates entities with both buffers), the modifier names another stat, or it was added after `LockstepStatSystem` updated (it applies from the next tick) |
+| A stat keeps its old value | The modifier names another stat or a resource (resources take `LockstepStatChange`s), the change names an attribute, the receiver lacks the grant's `LockstepStatTarget` or a `LockstepStatGrantor` naming the granting entity, or it was added after `LockstepStatSystem` updated (it applies from the next tick) |
+| A capped resource stays empty or ignores its cap | The entity has no attribute of the `cap` type, so the resource is uncapped; bake the cap attribute in the same buffer |
 | `LockstepStatSystem` recalculates every tick | A system writes the stats every tick, also by only taking `DynamicBuffer<LockstepStat>` in a `SystemAPI.Query`, which is read-write: read them with `in` in an `IJobEntity` or with a read-only `BufferLookup` |
 | Connections drop when the window loses focus | `Application.runInBackground` is off |
 | A "Burst error" in the console | Burst falls back to managed code silently in some cases; fix the reported construct (for example a managed array in a Burst method) |

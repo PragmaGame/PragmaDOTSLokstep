@@ -118,6 +118,29 @@ namespace Pragma.Lockstep.Tests
         }
 
         [Test]
+        public void BufferViews_GetTheBufferWhenItIsWritten()
+        {
+            using (var session = new SessionHarness(Settings()))
+            using (var views = new ViewHarness())
+            {
+                var client = AddClient(session);
+                views.Show(client);
+                views.Run(session, client, 24);
+                var first = views.SpawnedView();
+                var part = first.GetComponent<TestViewElementView>();
+                CollectionAssert.AreEqual(new[] { "1", "1,2" }, part.contents, "the buffer of the new view, then one push per write");
+
+                views.Run(session, client, 25);
+                CollectionAssert.AreEqual(new[] { "1,2" }, views.SpawnedView().GetComponent<TestViewElementView>().contents,
+                    "a new view starts from the current buffer");
+
+                views.Run(session, client, 33);
+                Assert.AreSame(first, views.SpawnedView());
+                CollectionAssert.AreEqual(new[] { "1", "1,2", "3" }, part.contents);
+            }
+        }
+
+        [Test]
         public void AutoUpdate_PausesAndCatchesUp()
         {
             using (var session = new SessionHarness(Settings()))
@@ -646,10 +669,14 @@ namespace Pragma.Lockstep.Tests
                 Assert.AreEqual(1, data.value);
                 Assert.IsTrue(view.TryGetData<TestViewHidden>(out _), "a tag is read on or off");
                 Assert.IsFalse(view.TryGetData<LockstepEntityId>(out _), "the entity has no id");
+                Assert.IsTrue(view.TryGetBuffer<TestViewElement>(out var elements));
+                Assert.AreEqual(1, elements.Length);
+                Assert.AreEqual(1, elements[0].value);
 
                 // Tick 25 changes the key, which returns this view to the pool.
                 views.Run(session, client, 25);
                 Assert.IsFalse(view.TryGetData<TestViewData>(out _), "an unbound view reads nothing");
+                Assert.IsFalse(view.TryGetBuffer<TestViewElement>(out _));
             }
         }
 

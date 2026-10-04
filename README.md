@@ -19,8 +19,9 @@ server never simulates, and the bandwidth depends on the number of players, not 
 - Netcode for Entities integration (host, dedicated server, thin clients) and a transport-agnostic core.
 - Deterministic navigation: a walkability grid, obstacles, A* with string pulling in integer math, agents that re-plan
   when obstacles change.
-- Stats with flat, additive and multiplicative modifiers, timed or removed with their source, recalculated only where
-  something changed.
+- Stats: attributes with flat, additive and multiplicative modifiers (timed, non-stacking, removed with their source),
+  resources such as health with one-tick damage and healing and an attribute as their cap, bonuses a player or squad
+  grants to all of its units; recalculated only where something changed.
 - GameObject views adapted from ECV: pooled view prefabs per entity key, per-component parts fed when their component
   changes, interpolated transforms, a pool each project can replace.
 
