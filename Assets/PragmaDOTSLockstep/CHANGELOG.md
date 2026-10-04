@@ -35,7 +35,11 @@ and this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `LockstepNavWaypoint`) that walk their paths in `FixedPoint`, plan in parallel and plan again when an obstacle
   blocks their way. `LockstepNavSystemGroup` runs `LockstepNavObstacleSystem`, `LockstepNavPathSystem` and
   `LockstepNavMoveSystem`; `LockstepNavGridAuthoring`, `LockstepNavObstacleAuthoring` and `LockstepNavAgentAuthoring`
-  bake them, and selecting a grid previews the cells the obstacles block.
+  bake them, and selecting a grid previews the cells the obstacles block. An agent standing still on a cell that becomes
+  blocked (a building placed on top of it, a unit spawned or stopped inside one) walks to the nearest walkable cell.
+  `LockstepNavigation.IsClear` tells whether a footprint could be stamped without touching a blocked cell (where a
+  building may be placed); `Covers` and `GetCoverage` give the cells a footprint blocks, for footprints not stamped
+  yet.
 - Stats (`Pragma.Lockstep.Stats`), under the game's own stat ids or enum values, in `FixedPoint`:
   - attributes (`LockstepStat.Attribute`): a base value and `LockstepStatModifier`s, flat, additive or multiplicative
     (percentage factors stop at zero), each with a `LockstepStatSource`, an optional end tick and a stacking rule

@@ -222,6 +222,57 @@ namespace Pragma.Lockstep.Tests
         }
 
         [Test]
+        public void Covers_IsWhatAStampBlocks()
+        {
+            var grid = CreateGrid(FixedPoint.FromFraction(1, 2));
+            using (var cells = new NativeArray<LockstepNavCell>(grid.CellCount, Allocator.Temp))
+            {
+                var obstacle = new LockstepNavObstacle { center = new FixedVector2(1, 0), size = new FixedVector2(3, 1) };
+                var transform = LockstepTransform.FromPositionRotation(new FixedVector3(-2, 0, 4), FixedQuaternion.RotateY(FixedMath.ToRadians(55)));
+                var footprint = LockstepNavObstacleFootprint.Create(obstacle, transform);
+                LockstepNavigation.Stamp(grid, cells, footprint, 1);
+                LockstepNavigation.GetCoverage(grid, footprint, out var min, out var max);
+
+                var covered = 0;
+                for (var i = 0; i < cells.Length; i++)
+                {
+                    var cell = grid.GetCell(i);
+                    var isCovered = LockstepNavigation.Covers(grid, footprint, cell);
+                    Assert.AreEqual(cells[i].blockers > 0, isCovered, $"cell {cell}");
+                    if (isCovered)
+                    {
+                        Assert.IsTrue(cell.x >= min.x && cell.y >= min.y && cell.x <= max.x && cell.y <= max.y, $"cell {cell} lies in the coverage");
+                        covered++;
+                    }
+                }
+                Assert.Greater(covered, 12);
+            }
+        }
+
+        [Test]
+        public void IsClear_OnlyWhereAStampWouldTouchNoBlockedCell()
+        {
+            var grid = CreateGrid(FixedPoint.FromFraction(1, 2));
+            using (var cells = new NativeArray<LockstepNavCell>(grid.CellCount, Allocator.Temp))
+            {
+                var building = new LockstepNavObstacle { size = new FixedVector2(2, 2) };
+                LockstepNavigation.Stamp(grid, cells, LockstepNavObstacleFootprint.Create(building, LockstepTransform.FromPosition(Point(0, 0))), 1);
+
+                Assert.IsTrue(LockstepNavigation.IsClear(grid, cells, LockstepNavObstacleFootprint.Create(building, LockstepTransform.FromPosition(Point(5, 0)))),
+                              "far enough: the agent radius of both still leaves a lane");
+                Assert.IsFalse(LockstepNavigation.IsClear(grid, cells, LockstepNavObstacleFootprint.Create(building, LockstepTransform.FromPosition(Point(2, 0)))),
+                               "touching: the grown footprints overlap");
+                Assert.IsFalse(LockstepNavigation.IsClear(grid, cells, LockstepNavObstacleFootprint.Create(building, LockstepTransform.FromPosition(Point(0, 0)))),
+                               "on top");
+                Assert.IsFalse(LockstepNavigation.IsClear(grid, cells, LockstepNavObstacleFootprint.Create(building, LockstepTransform.FromPosition(Point(-9, 6)))),
+                               "partly outside the grid");
+                Assert.IsFalse(LockstepNavigation.IsClear(grid, new NativeArray<LockstepNavCell>(0, Allocator.Temp),
+                                                          LockstepNavObstacleFootprint.Create(building, LockstepTransform.FromPosition(Point(5, 0)))),
+                               "cells that do not match the grid");
+            }
+        }
+
+        [Test]
         public void Burst_FindsTheSamePaths()
         {
             const int queries = 40;
@@ -372,6 +423,58 @@ namespace Pragma.Lockstep.Tests
                 var state = entityManager.GetComponentData<LockstepNavAgent>(agent);
                 Assert.IsFalse(state.isPathPartial);
                 Assert.AreEqual(destination, entityManager.GetComponentData<LockstepTransform>(agent).position);
+            }
+        }
+
+        [Test]
+        public void Agent_StandingWhereAnObstacleAppears_WalksOutOfIt()
+        {
+            using (var simulation = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
+            {
+                var entityManager = simulation.World.EntityManager;
+                var grid = CreateGrid(entityManager, FixedPoint.Half);
+                var inside = CreateAgent(entityManager, Point(FixedPoint.FromFraction(1, 4), FixedPoint.FromFraction(1, 4)), 4, default);
+                var outside = CreateAgent(entityManager, Point(6, 6), 4, default);
+                TestUtility.Step(simulation);
+                Assert.AreEqual(LockstepNavStatus.Idle, entityManager.GetComponentData<LockstepNavAgent>(inside).status, "nothing blocks it yet");
+
+                CreateWall(entityManager, FixedVector2.Zero, new FixedVector2(3, 3));
+                TestUtility.Step(simulation);
+                Assert.AreEqual(LockstepNavStatus.Moving, entityManager.GetComponentData<LockstepNavAgent>(inside).status, "the agent walks out");
+
+                for (var i = 0; i < 60; i++)
+                {
+                    TestUtility.Step(simulation);
+                }
+                Assert.AreEqual(LockstepNavStatus.Arrived, entityManager.GetComponentData<LockstepNavAgent>(inside).status);
+                Assert.IsTrue(IsWalkable(entityManager, grid, entityManager.GetComponentData<LockstepTransform>(inside).position));
+                Assert.AreEqual(LockstepNavStatus.Idle, entityManager.GetComponentData<LockstepNavAgent>(outside).status, "an agent on a walkable cell stays");
+                Assert.AreEqual(Point(6, 6), entityManager.GetComponentData<LockstepTransform>(outside).position);
+            }
+        }
+
+        [Test]
+        public void Agent_StoppedInsideAnObstacle_WalksOutOfIt()
+        {
+            using (var simulation = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
+            {
+                var entityManager = simulation.World.EntityManager;
+                var grid = CreateGrid(entityManager, FixedPoint.Half);
+                CreateWall(entityManager, FixedVector2.Zero, new FixedVector2(3, 3));
+                var agent = CreateAgent(entityManager, Point(-6, 0), 4, Point(6, 0));
+                TestUtility.Step(simulation);
+
+                // The agent is put inside the obstacle and stopped there, while the grid stays as it is.
+                entityManager.SetComponentData(agent, LockstepTransform.FromPosition(Point(0, 0)));
+                var state = entityManager.GetComponentData<LockstepNavAgent>(agent);
+                state.Stop();
+                entityManager.SetComponentData(agent, state);
+                for (var i = 0; i < 60; i++)
+                {
+                    TestUtility.Step(simulation);
+                }
+                Assert.AreEqual(LockstepNavStatus.Arrived, entityManager.GetComponentData<LockstepNavAgent>(agent).status);
+                Assert.IsTrue(IsWalkable(entityManager, grid, entityManager.GetComponentData<LockstepTransform>(agent).position));
             }
         }
 

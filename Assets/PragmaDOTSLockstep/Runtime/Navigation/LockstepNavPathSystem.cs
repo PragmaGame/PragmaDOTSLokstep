@@ -9,7 +9,7 @@ namespace Pragma.Lockstep.Navigation
     /// <summary>
     /// Plans the paths of agents that got a destination, and checks the paths of walking agents again whenever the grid
     /// changed: a path an obstacle now blocks is planned again, and so is a partial one, whose destination may have become
-    /// reachable.
+    /// reachable. An agent standing still on a cell that became blocked walks to the nearest walkable cell.
     /// </summary>
     /// <remarks>
     /// Agents are planned in parallel. A path depends only on the grid and on its own agent, so it is the same whichever
@@ -71,8 +71,13 @@ namespace Pragma.Lockstep.Navigation
                     Plan(transform.position, ref agent, waypoints);
                     return;
                 }
-                if (agent.status != LockstepNavStatus.Moving || !hasGrid || agent.gridVersion == grid.version)
+                if (!hasGrid || agent.gridVersion == grid.version)
                 {
+                    return;
+                }
+                if (agent.status != LockstepNavStatus.Moving)
+                {
+                    StepOutOfObstacle(transform.position, ref agent, waypoints);
                     return;
                 }
                 if (!agent.isPathPartial && IsClear(transform.position, agent.waypointIndex, waypoints))
@@ -81,6 +86,23 @@ namespace Pragma.Lockstep.Navigation
                     return;
                 }
                 Plan(transform.position, ref agent, waypoints);
+            }
+
+            // An agent standing still on a cell an obstacle now blocks (a building placed on top of it, a unit spawned
+            // inside one) walks to the nearest walkable cell; elsewhere it only takes note of the grid it stands on.
+            private void StepOutOfObstacle(FixedVector3 position, ref LockstepNavAgent agent, DynamicBuffer<LockstepNavWaypoint> waypoints)
+            {
+                agent.gridVersion = grid.version;
+                var cell = grid.WorldToCell(position);
+                if (!grid.Contains(cell) ||
+                    LockstepNavigation.IsWalkable(grid, cells, cell) ||
+                    !LockstepNavigation.TryFindNearestWalkable(grid, cells, cell, out var nearest))
+                {
+                    return;
+                }
+                var center = grid.GetCellCenter(nearest);
+                agent.destination = new FixedVector3(center.x, position.y, center.y);
+                Plan(position, ref agent, waypoints);
             }
 
             private void Plan(FixedVector3 position, ref LockstepNavAgent agent, DynamicBuffer<LockstepNavWaypoint> waypoints)

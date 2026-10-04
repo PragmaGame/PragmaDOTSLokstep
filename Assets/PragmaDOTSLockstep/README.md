@@ -729,7 +729,7 @@ lockstep: it works in floats, is built per platform and answers differently on d
 | `LockstepNavObstacle` | A rectangle (center, size) in the space of the entity's `LockstepTransform` (yaw and uniform scale apply), or in world space without one. It blocks every cell whose centre is within the agent radius of it |
 | `LockstepNavAgent` | Speed, angular speed and stopping distance of a unit that walks, its destination and status (`Idle`, `Requested`, `Moving`, `Arrived`). The path is its `LockstepNavWaypoint` buffer |
 | `LockstepNavSystemGroup` | Inside `LockstepSimulationSystemGroup`: `LockstepNavObstacleSystem` stamps obstacles, `LockstepNavPathSystem` plans and checks paths in parallel, `LockstepNavMoveSystem` walks agents |
-| `LockstepPathfinder`, `LockstepNavigation` | The search and the grid queries (`IsWalkable`, `HasLineOfSight`, `TryFindNearestWalkable`, `Stamp`) for systems of your own |
+| `LockstepPathfinder`, `LockstepNavigation` | The search and the grid queries (`IsWalkable`, `HasLineOfSight`, `TryFindNearestWalkable`, `IsClear`, `Covers`, `GetCoverage`, `Stamp`) for systems of your own |
 
 ### Setting it up
 
@@ -761,6 +761,11 @@ public partial struct MoveOrderSystem : ISystem
 
 `LockstepNavAgent.Stop()` stops an agent where it stands.
 
+To check where a building may go, build its footprint with `LockstepNavObstacleFootprint.Create(obstacle, transform)`
+and ask `LockstepNavigation.IsClear(grid, cells, footprint)`: true when every cell it would block is inside the grid and
+walkable. Footprints that are not in the grid yet (two buildings placed on one tick) are compared cell by cell with
+`GetCoverage` and `Covers`.
+
 ### Behaviour
 
 - **Paths.** A* over the eight neighbours of a cell with integer costs (10 straight, 14 diagonal) and an octile
@@ -769,7 +774,9 @@ public partial struct MoveOrderSystem : ISystem
   segment through a cell corner counts both cells beside it.
 - **Blocked and unreachable destinations.** A destination in a blocked cell moves to the nearest free cell. When the
   destination cannot be reached at all, the path ends at the reachable cell closest to it and `isPathPartial` is set.
-  An agent standing in an obstacle (a building placed on top of it) first walks to the nearest free cell.
+  An agent standing in an obstacle first walks to the nearest free cell. An agent standing still on a cell that becomes
+  blocked (a building placed on top of it, a unit spawned or stopped inside one) walks to the nearest free cell by
+  itself and arrives there.
 - **Changing obstacles.** Obstacles block cells while their entity exists. Spawning, moving, resizing or destroying one
   updates the cells on the next navigation update and changes `LockstepNavGrid.version`; walking agents then check the
   rest of their path and plan again when it is blocked. Partial paths are planned again on every change, since the

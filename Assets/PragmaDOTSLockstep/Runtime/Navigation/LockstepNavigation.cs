@@ -143,21 +143,13 @@ namespace Pragma.Lockstep.Navigation
         }
 
         /// <summary>
-        /// Adds <paramref name="count"/> blockers to every cell whose centre is within the grid's agent radius of the
-        /// footprint, or removes them when the count is negative. <see cref="LockstepNavObstacleSystem"/> does this for
-        /// obstacle entities: call it only on cells you own, such as an editor preview or a test.
+        /// Adds <paramref name="count"/> blockers to every cell the footprint covers (see <see cref="Covers"/>), or removes
+        /// them when the count is negative; cells outside the grid are skipped. <see cref="LockstepNavObstacleSystem"/> does
+        /// this for obstacle entities: call it only on cells you own, such as an editor preview or a test.
         /// </summary>
         public static void Stamp(in LockstepNavGrid grid, NativeArray<LockstepNavCell> cells, in LockstepNavObstacleFootprint footprint, int count)
         {
-            var radius = grid.agentRadius;
-            var right = footprint.right;
-            var forward = footprint.Forward;
-            var halfSize = footprint.halfSize;
-            var reach = new FixedVector2(
-                FixedMath.Abs(right.x) * halfSize.x + FixedMath.Abs(forward.x) * halfSize.y + radius,
-                FixedMath.Abs(right.y) * halfSize.x + FixedMath.Abs(forward.y) * halfSize.y + radius);
-            var min = grid.WorldToCell(footprint.center - reach);
-            var max = grid.WorldToCell(footprint.center + reach);
+            GetCoverage(grid, footprint, out var min, out var max);
             if (max.x < 0 || max.y < 0 || min.x >= grid.width || min.y >= grid.height)
             {
                 return;
@@ -165,17 +157,12 @@ namespace Pragma.Lockstep.Navigation
             min = grid.ClampToGrid(min);
             max = grid.ClampToGrid(max);
 
-            var radiusSquared = radius * radius;
             for (var y = min.y; y <= max.y; y++)
             {
                 for (var x = min.x; x <= max.x; x++)
                 {
                     var cell = new int2(x, y);
-                    // How far the cell centre lies outside the rectangle, along each of its axes.
-                    var offset = grid.GetCellCenter(cell) - footprint.center;
-                    var outsideX = FixedMath.Max(FixedMath.Abs(FixedMath.Dot(offset, right)) - halfSize.x, FixedPoint.Zero);
-                    var outsideZ = FixedMath.Max(FixedMath.Abs(FixedMath.Dot(offset, forward)) - halfSize.y, FixedPoint.Zero);
-                    if (outsideX * outsideX + outsideZ * outsideZ > radiusSquared)
+                    if (!Covers(grid, footprint, cell))
                     {
                         continue;
                     }
@@ -184,6 +171,62 @@ namespace Pragma.Lockstep.Navigation
                     cells[index] = new LockstepNavCell { blockers = (ushort)blockers };
                 }
             }
+        }
+
+        /// <summary>
+        /// The footprint could be stamped without touching a blocked cell: every cell it covers is inside the grid and
+        /// walkable. Use it to check where a building may be placed; false when the cells do not match the grid.
+        /// </summary>
+        public static bool IsClear(in LockstepNavGrid grid, NativeArray<LockstepNavCell> cells, in LockstepNavObstacleFootprint footprint)
+        {
+            if (!grid.IsValid || cells.Length != grid.CellCount)
+            {
+                return false;
+            }
+
+            GetCoverage(grid, footprint, out var min, out var max);
+            for (var y = min.y; y <= max.y; y++)
+            {
+                for (var x = min.x; x <= max.x; x++)
+                {
+                    var cell = new int2(x, y);
+                    if (Covers(grid, footprint, cell) && !IsWalkable(grid, cells, cell))
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// The footprint blocks the cell: the cell centre is within the grid's agent radius of the rectangle. The cell may
+        /// lie outside the grid, so footprints that are not stamped yet can be checked against each other.
+        /// </summary>
+        public static bool Covers(in LockstepNavGrid grid, in LockstepNavObstacleFootprint footprint, int2 cell)
+        {
+            // How far the cell centre lies outside the rectangle, along each of its axes.
+            var offset = grid.GetCellCenter(cell) - footprint.center;
+            var outsideX = FixedMath.Max(FixedMath.Abs(FixedMath.Dot(offset, footprint.right)) - footprint.halfSize.x, FixedPoint.Zero);
+            var outsideZ = FixedMath.Max(FixedMath.Abs(FixedMath.Dot(offset, footprint.Forward)) - footprint.halfSize.y, FixedPoint.Zero);
+            return outsideX * outsideX + outsideZ * outsideZ <= grid.agentRadius * grid.agentRadius;
+        }
+
+        /// <summary>
+        /// Every cell the footprint covers lies between <paramref name="min"/> and <paramref name="max"/> (inclusive); the
+        /// range is not clamped to the grid. Walk it with <see cref="Covers"/>.
+        /// </summary>
+        public static void GetCoverage(in LockstepNavGrid grid, in LockstepNavObstacleFootprint footprint, out int2 min, out int2 max)
+        {
+            var radius = grid.agentRadius;
+            var right = footprint.right;
+            var forward = footprint.Forward;
+            var halfSize = footprint.halfSize;
+            var reach = new FixedVector2(
+                FixedMath.Abs(right.x) * halfSize.x + FixedMath.Abs(forward.x) * halfSize.y + radius,
+                FixedMath.Abs(right.y) * halfSize.x + FixedMath.Abs(forward.y) * halfSize.y + radius);
+            min = grid.WorldToCell(footprint.center - reach);
+            max = grid.WorldToCell(footprint.center + reach);
         }
     }
 }

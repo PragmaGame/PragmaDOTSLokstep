@@ -148,12 +148,12 @@ Namespace and assembly `Pragma.Lockstep.Navigation`.
 | `LockstepNavCell` | Buffer on the grid entity, row by row along X: `ushort blockers`, `IsWalkable`. Sized by `LockstepNavObstacleSystem` |
 | `LockstepNavObstacle` | `FixedVector2 center`, `FixedVector2 size`: a rectangle in the space of the entity's `LockstepTransform` (yaw, uniform scale), world space without one |
 | `LockstepNavObstacleFootprint` | Cleanup component the obstacle system writes: the stamped world rectangle (`center`, `right`, `halfSize`, `Forward`); `Create(obstacle, transform)`, `Create(obstacle)` |
-| `LockstepNavAgent` | `speed`, `angularSpeed` (radians per second, 0 turns at once), `stoppingDistance`, `destination`, `status`, `isPathPartial`, `waypointIndex`, `gridVersion`; `SetDestination(FixedVector3)`, `Stop()`, `IsMoving` |
+| `LockstepNavAgent` | `speed`, `angularSpeed` (radians per second, 0 turns at once), `stoppingDistance`, `destination`, `status`, `isPathPartial`, `waypointIndex`, `gridVersion`; `SetDestination(FixedVector3)`, `Stop()` (the agent's cell is checked again: stopped inside an obstacle, it walks out), `IsMoving`. An idle or arrived agent on a cell that becomes blocked walks to the nearest walkable cell |
 | `LockstepNavStatus` | `Idle`, `Requested` (planned in the next navigation update), `Moving`, `Arrived` |
 | `LockstepNavWaypoint` | Buffer: `FixedVector3 position`; the path, end included, Y of the destination |
 | `LockstepNavSystemGroup` | In `LockstepSimulationSystemGroup`: `LockstepNavObstacleSystem` (first), `LockstepNavPathSystem`, `LockstepNavMoveSystem`. Set destinations before it |
 | `LockstepPathfinder` | `new LockstepPathfinder(cellCount, allocator)`, `FindPath(grid, cells, start, destination, NativeList<FixedVector3> or DynamicBuffer<LockstepNavWaypoint>)` returns `LockstepPathStatus` (`Failed`, `Complete`, `Partial`), `Dispose()`. Keeps scratch memory; one per thread |
-| `LockstepNavigation` | `IsWalkable(grid, cells, cell or position)`, `HasLineOfSight(grid, cells, from, to)` (exact, corners count both sides), `TryFindNearestWalkable(grid, cells, cell, out nearest)`, `Stamp(grid, cells, footprint, count)` for previews and tests |
+| `LockstepNavigation` | `IsWalkable(grid, cells, cell or position)`, `HasLineOfSight(grid, cells, from, to)` (exact, corners count both sides), `TryFindNearestWalkable(grid, cells, cell, out nearest)`, `IsClear(grid, cells, footprint)` (every cell the footprint would block is inside the grid and walkable: where a building may go), `Covers(grid, footprint, cell)` and `GetCoverage(grid, footprint, out min, out max)` (the cells a footprint blocks, outside the grid too, for footprints not stamped yet), `Stamp(grid, cells, footprint, count)` for previews and tests |
 
 Read the cells with `SystemAPI.GetSingletonBuffer<LockstepNavCell>(true).AsNativeArray()` and the grid with
 `SystemAPI.GetSingleton<LockstepNavGrid>()`.

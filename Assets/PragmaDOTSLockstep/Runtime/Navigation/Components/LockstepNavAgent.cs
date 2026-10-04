@@ -40,10 +40,14 @@ namespace Pragma.Lockstep.Navigation
             status = LockstepNavStatus.Requested;
         }
 
-        /// <summary>Stops where the agent stands.</summary>
+        /// <summary>
+        /// Stops where the agent stands. The next navigation update checks the cell it stopped on: an agent stopped inside
+        /// an obstacle walks out of it.
+        /// </summary>
         public void Stop()
         {
             status = LockstepNavStatus.Idle;
+            gridVersion = 0;
         }
     }
 }

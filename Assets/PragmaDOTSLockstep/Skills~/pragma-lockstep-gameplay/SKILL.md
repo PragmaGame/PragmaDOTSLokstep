@@ -276,8 +276,12 @@ Units that walk around obstacles use `Pragma.Lockstep.Navigation` (assembly refe
   `agent.ValueRW.SetDestination(target)` from a system with `[UpdateBefore(typeof(LockstepNavSystemGroup))]` and reads
   `status` (`Requested`, `Moving`, `Arrived`) and `isPathPartial`. Never write `LockstepTransform` of a walking agent
   yourself; call `Stop()` first.
-- **Queries.** `LockstepNavigation.IsWalkable`, `HasLineOfSight`, `TryFindNearestWalkable` for placement checks and AI;
+- **Queries.** `LockstepNavigation.IsWalkable`, `HasLineOfSight`, `TryFindNearestWalkable` for AI;
+  `IsClear(grid, cells, footprint)` for where a building may be placed (every cell it would block is inside the grid and
+  walkable), `GetCoverage` and `Covers` to compare footprints not stamped yet (placements of the same tick);
   `LockstepPathfinder` (scratch memory, one per thread) for paths outside agents.
+- **Standing in an obstacle.** An idle or arrived agent whose cell becomes blocked (a building placed on it, a unit
+  spawned or stopped inside one) walks to the nearest walkable cell by itself.
 - Agents do not avoid each other. See `references/simulation-api.md` and the README section *Navigation*.
 
 ## Stats
