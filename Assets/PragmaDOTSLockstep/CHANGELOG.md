@@ -8,6 +8,13 @@ and this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Ground heights for navigation: `LockstepNavHeight`, a buffer of world Y at every cell corner of the grid, and
+  `LockstepNavGrid.maxSlope`, the steepest walkable slope. Agents walk on the ground (`LockstepNavMoveSystem`,
+  `LockstepNavSeparationSystem`), cells steeper than the limit are blocked for good, and `LockstepNavigation` answers
+  `HasHeights`, `GetHeight`, `ToGround` and `IsSteep`. `LockstepNavGridAuthoring` bakes the heights from a `TerrainData`
+  (its world Y and the slope limit in degrees) and previews the steep cells. The package now depends on
+  `com.unity.modules.terrain`.
+
 - GameObject views (`Pragma.Lockstep.Views`), adapted from ECV (Entity Component View): `EntityView` prefabs with
   one part per component type (`EntityComponentView<T>`, `EntityComponentViewUnmanaged<T>`, `TransformComponentView`)
   or dynamic buffer (`EntityBufferView<T>`), all deriving from `EntityViewPart`, spawned and returned by
@@ -70,6 +77,8 @@ and this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version 1 are refused.
 - `LockstepClient` and `LockstepServer` queue commands in their wire form; the server checks the form and relays the
   bytes without decoding them.
+- Agents walk on the XZ plane: their speed is over it, and their Y is the ground under them, or stays as it is on a grid
+  without heights. They no longer climb or sink towards the Y of their destination.
 
 ### Fixed
 

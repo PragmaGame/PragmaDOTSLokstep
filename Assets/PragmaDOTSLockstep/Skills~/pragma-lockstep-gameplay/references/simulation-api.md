@@ -144,16 +144,17 @@ Namespace and assembly `Pragma.Lockstep.Navigation`.
 
 | Type | Members |
 |---|---|
-| `LockstepNavGrid` | Singleton. `FixedVector2 origin` (corner of cell 0, 0 on X and Z), `FixedPoint cellSize`, `int width`, `int height`, `FixedPoint agentRadius`, `uint version` (changes with any cell); `CellCount`, `IsValid`, `Contains`, `GetIndex`, `GetCell`, `WorldToCell`, `GetCellCenter`, `ClampToGrid` |
-| `LockstepNavCell` | Buffer on the grid entity, row by row along X: `ushort blockers`, `IsWalkable`. Sized by `LockstepNavObstacleSystem` |
+| `LockstepNavGrid` | Singleton. `FixedVector2 origin` (corner of cell 0, 0 on X and Z), `FixedPoint cellSize`, `int width`, `int height`, `FixedPoint agentRadius`, `FixedPoint maxSlope` (rise over run; steeper cells are blocked, 0 none), `uint version` (changes with any cell); `CellCount`, `CornerCount`, `IsValid`, `Contains`, `GetIndex`, `GetCornerIndex`, `GetCell`, `WorldToCell`, `GetCellCenter`, `ClampToGrid` |
+| `LockstepNavCell` | Buffer on the grid entity, row by row along X: `ushort blockers`, `IsWalkable`. Sized by `LockstepNavObstacleSystem`, which starts every steep cell with one permanent blocker |
+| `LockstepNavHeight` | Optional buffer on the grid entity: `FixedPoint value`, world Y of the ground at each cell corner, `CornerCount` of them row by row along X. Static: read when the cells are built. Agents walk on it |
 | `LockstepNavObstacle` | `FixedVector2 center`, `FixedVector2 size`: a rectangle in the space of the entity's `LockstepTransform` (yaw, uniform scale), world space without one |
 | `LockstepNavObstacleFootprint` | Cleanup component the obstacle system writes: the stamped world rectangle (`center`, `right`, `halfSize`, `Forward`); `Create(obstacle, transform)`, `Create(obstacle)` |
 | `LockstepNavAgent` | `speed`, `angularSpeed` (radians per second, 0 turns at once), `stoppingDistance`, `radius` (body: overlapping agents are pushed apart; 0 takes no part), `destination`, `status`, `isPathPartial`, `waypointIndex`, `gridVersion`; `SetDestination(FixedVector3)`, `Stop()` (the agent's cell is checked again: stopped inside an obstacle, it walks out), `IsMoving`. An idle or arrived agent on a cell that becomes blocked walks to the nearest walkable cell |
 | `LockstepNavStatus` | `Idle`, `Requested` (planned in the next navigation update), `Moving`, `Arrived` |
-| `LockstepNavWaypoint` | Buffer: `FixedVector3 position`; the path, end included, Y of the destination |
+| `LockstepNavWaypoint` | Buffer: `FixedVector3 position`; the path, end included, Y of the destination (not walked to: agents walk on X and Z, their Y is the ground) |
 | `LockstepNavSystemGroup` | In `LockstepSimulationSystemGroup`: `LockstepNavObstacleSystem` (first), `LockstepNavPathSystem`, `LockstepNavMoveSystem`, `LockstepNavSeparationSystem` (pushes overlapping agents apart). Set destinations before it |
 | `LockstepPathfinder` | `new LockstepPathfinder(cellCount, allocator)`, `FindPath(grid, cells, start, destination, NativeList<FixedVector3> or DynamicBuffer<LockstepNavWaypoint>)` returns `LockstepPathStatus` (`Failed`, `Complete`, `Partial`), `Dispose()`. Keeps scratch memory; one per thread |
-| `LockstepNavigation` | `IsWalkable(grid, cells, cell or position)`, `HasLineOfSight(grid, cells, from, to)` (exact, corners count both sides), `TryFindNearestWalkable(grid, cells, cell, out nearest)`, `IsClear(grid, cells, footprint)` (every cell the footprint would block is inside the grid and walkable: where a building may go), `Covers(grid, footprint, cell)` and `GetCoverage(grid, footprint, out min, out max)` (the cells a footprint blocks, outside the grid too, for footprints not stamped yet), `Stamp(grid, cells, footprint, count)` for previews and tests |
+| `LockstepNavigation` | `IsWalkable(grid, cells, cell or position)`, `HasLineOfSight(grid, cells, from, to)` (exact, corners count both sides), `TryFindNearestWalkable(grid, cells, cell, out nearest)`, `IsClear(grid, cells, footprint)` (every cell the footprint would block is inside the grid and walkable: where a building may go), `Covers(grid, footprint, cell)` and `GetCoverage(grid, footprint, out min, out max)` (the cells a footprint blocks, outside the grid too, for footprints not stamped yet), `Stamp(grid, cells, footprint, count)` for previews and tests; ground: `HasHeights(grid, heights)`, `GetHeight(grid, heights, xz)` (bilinear, the edge beyond the grid), `ToGround(grid, heights, position)` (unchanged without heights), `IsSteep(grid, heights, cell)` |
 
 Read the cells with `SystemAPI.GetSingletonBuffer<LockstepNavCell>(true).AsNativeArray()` and the grid with
 `SystemAPI.GetSingleton<LockstepNavGrid>()`.
@@ -211,8 +212,9 @@ Namespace `Pragma.Lockstep.Authoring`:
 - `LockstepEntityIdAuthoring` - adds `LockstepEntityId`.
 - `EntityViewKeyAuthoring` - adds `EntityViewKey`, so instances get the GameObject view bound to the key.
 - `EntityViewConfigAuthoring` - bakes an `EntityViewConfig` catalog into the presentation world (not for servers).
-- `LockstepNavGridAuthoring` - the navigation grid of a map (size, cell size, agent radius); needs and adds
-  `LockstepSceneEntityAuthoring`. Selecting it previews the blocked cells.
+- `LockstepNavGridAuthoring` - the navigation grid of a map (size, cell size, agent radius) and its ground: a
+  `TerrainData` covering the grid exactly, its world Y and the steepest walkable slope in degrees; needs and adds
+  `LockstepSceneEntityAuthoring`. Selecting it previews the cells obstacles and steep ground block.
 - `LockstepNavObstacleAuthoring` - a box whose X and Z block the grid; moves with a `LockstepTransformAuthoring` next to
   it, otherwise its pose is baked (static map content, add `LockstepSceneEntityAuthoring`).
 - `LockstepNavAgentAuthoring` - `LockstepNavAgent` and its waypoint buffer; needs `LockstepTransformAuthoring`.

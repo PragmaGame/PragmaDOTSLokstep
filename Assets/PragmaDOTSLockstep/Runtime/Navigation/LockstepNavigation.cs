@@ -4,9 +4,66 @@ using Unity.Mathematics;
 
 namespace Pragma.Lockstep.Navigation
 {
-    /// <summary>Queries on a <see cref="LockstepNavGrid"/> and its cells, in integer and fixed-point math only.</summary>
+    /// <summary>Queries on a <see cref="LockstepNavGrid"/>, its cells and its ground, in integer and fixed-point math only.</summary>
     public static class LockstepNavigation
     {
+        /// <summary>The heights describe the ground of the grid: one per cell corner.</summary>
+        public static bool HasHeights(in LockstepNavGrid grid, NativeArray<LockstepNavHeight> heights)
+        {
+            return grid.IsValid && heights.Length == grid.CornerCount;
+        }
+
+        /// <summary>
+        /// World Y of the ground at a world position (X and Z): bilinear between the corners of its cell, so a plane comes
+        /// out exact. Outside the grid, the ground of its nearest edge. The heights must match the grid
+        /// (<see cref="HasHeights"/>).
+        /// </summary>
+        public static FixedPoint GetHeight(in LockstepNavGrid grid, NativeArray<LockstepNavHeight> heights, FixedVector2 position)
+        {
+            var size = grid.cellSize.rawValue;
+            var offsetX = math.clamp(position.x.rawValue - grid.origin.x.rawValue, 0L, size * grid.width);
+            var offsetZ = math.clamp(position.y.rawValue - grid.origin.y.rawValue, 0L, size * grid.height);
+            var x = (int)math.min(offsetX / size, grid.width - 1);
+            var z = (int)math.min(offsetZ / size, grid.height - 1);
+            var u = FixedPoint.FromRaw(offsetX - x * size) / grid.cellSize;
+            var v = FixedPoint.FromRaw(offsetZ - z * size) / grid.cellSize;
+            var near = GetHeight(grid, heights, x, z);
+            var nearRight = GetHeight(grid, heights, x + 1, z);
+            var far = GetHeight(grid, heights, x, z + 1);
+            var farRight = GetHeight(grid, heights, x + 1, z + 1);
+            var nearEdge = near + (nearRight - near) * u;
+            var farEdge = far + (farRight - far) * u;
+            return nearEdge + (farEdge - nearEdge) * v;
+        }
+
+        /// <summary>The position on the ground: its Y is the height of the ground under it, or unchanged without heights.</summary>
+        public static FixedVector3 ToGround(in LockstepNavGrid grid, NativeArray<LockstepNavHeight> heights, FixedVector3 position)
+        {
+            return HasHeights(grid, heights) ? new FixedVector3(position.x, GetHeight(grid, heights, position.Xz), position.z) : position;
+        }
+
+        /// <summary>
+        /// The cell is too steep to walk on: two neighbouring corners of it differ in height by more than
+        /// <see cref="LockstepNavGrid.maxSlope"/> times the cell size. False outside the grid, without heights or without a
+        /// slope limit.
+        /// </summary>
+        public static bool IsSteep(in LockstepNavGrid grid, NativeArray<LockstepNavHeight> heights, int2 cell)
+        {
+            if (grid.maxSlope.rawValue <= 0 || !HasHeights(grid, heights) || !grid.Contains(cell))
+            {
+                return false;
+            }
+            var limit = grid.maxSlope * grid.cellSize;
+            var near = GetHeight(grid, heights, cell.x, cell.y);
+            var nearRight = GetHeight(grid, heights, cell.x + 1, cell.y);
+            var far = GetHeight(grid, heights, cell.x, cell.y + 1);
+            var farRight = GetHeight(grid, heights, cell.x + 1, cell.y + 1);
+            return FixedMath.Abs(nearRight - near) > limit ||
+                   FixedMath.Abs(far - near) > limit ||
+                   FixedMath.Abs(farRight - nearRight) > limit ||
+                   FixedMath.Abs(farRight - far) > limit;
+        }
+
         /// <summary>The cell is inside the grid and no obstacle covers it.</summary>
         public static bool IsWalkable(in LockstepNavGrid grid, NativeArray<LockstepNavCell> cells, int2 cell)
         {
@@ -210,6 +267,11 @@ namespace Pragma.Lockstep.Navigation
             var outsideX = FixedMath.Max(FixedMath.Abs(FixedMath.Dot(offset, footprint.right)) - footprint.halfSize.x, FixedPoint.Zero);
             var outsideZ = FixedMath.Max(FixedMath.Abs(FixedMath.Dot(offset, footprint.Forward)) - footprint.halfSize.y, FixedPoint.Zero);
             return outsideX * outsideX + outsideZ * outsideZ <= grid.agentRadius * grid.agentRadius;
+        }
+
+        private static FixedPoint GetHeight(in LockstepNavGrid grid, NativeArray<LockstepNavHeight> heights, int x, int z)
+        {
+            return heights[grid.GetCornerIndex(new int2(x, z))].value;
         }
 
         /// <summary>

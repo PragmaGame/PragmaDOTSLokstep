@@ -13,8 +13,9 @@ namespace Pragma.Lockstep.Navigation
     /// <see cref="LockstepNavAgent.radius"/> are pushed apart by half of the overlap per tick, so a crowd spreads out over
     /// a few ticks instead of jumping. Two walking or two standing agents share the push equally; a walking agent takes
     /// three quarters of it from a standing one, so it slides past a unit that holds its place, yet still shoulders its
-    /// way to a destination that unit stands on. An agent is never pushed onto a blocked cell of the grid, and an agent
-    /// with a zero radius neither pushes nor is pushed.
+    /// way to a destination that unit stands on. An agent is never pushed onto a blocked cell of the grid, a pushed agent
+    /// stays on the ground of the grid (<see cref="LockstepNavHeight"/>), and an agent with a zero radius neither pushes
+    /// nor is pushed.
     /// </summary>
     /// <remarks>
     /// An agent's push is the sum of the pushes of its neighbours, each a function of the pair alone, summed in exact
@@ -56,6 +57,17 @@ namespace Pragma.Lockstep.Navigation
             {
                 job.cells = CollectionHelper.CreateNativeArray<LockstepNavCell>(0, state.WorldUpdateAllocator);
             }
+            if (job.hasGrid &&
+                SystemAPI.TryGetSingletonBuffer<LockstepNavHeight>(out var heights, true) &&
+                LockstepNavigation.HasHeights(grid, heights.AsNativeArray()))
+            {
+                job.heights = heights.AsNativeArray();
+                job.hasHeights = true;
+            }
+            else
+            {
+                job.heights = CollectionHelper.CreateNativeArray<LockstepNavHeight>(0, state.WorldUpdateAllocator);
+            }
 
             job.entities = _agentQuery.ToEntityListAsync(state.WorldUpdateAllocator, state.Dependency, out var entitiesHandle);
             job.agents = _agentQuery.ToComponentDataListAsync<LockstepNavAgent>(state.WorldUpdateAllocator, state.Dependency, out var agentsHandle);
@@ -94,6 +106,8 @@ namespace Pragma.Lockstep.Navigation
             public LockstepNavGrid grid;
             [ReadOnly] public NativeArray<LockstepNavCell> cells;
             public bool hasGrid;
+            [ReadOnly] public NativeArray<LockstepNavHeight> heights;
+            public bool hasHeights;
 
             public void Execute()
             {
@@ -131,7 +145,7 @@ namespace Pragma.Lockstep.Navigation
                     var transform = transforms[index];
                     if (TryMove(transform.position, push, out var position))
                     {
-                        transform.position = position;
+                        transform.position = hasHeights ? LockstepNavigation.ToGround(grid, heights, position) : position;
                         transformLookup[entities[index]] = transform;
                     }
                 }

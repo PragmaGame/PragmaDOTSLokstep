@@ -17,8 +17,8 @@ server never simulates, and the bandwidth depends on the number of players, not 
 - A server that orders input and never stalls, adaptive input timing, a jitter-aware playout buffer.
 - Desync detection by majority vote with a per-component breakdown, replays, late join, offline mode.
 - Netcode for Entities integration (host, dedicated server, thin clients) and a transport-agnostic core.
-- Deterministic navigation: a walkability grid, obstacles, A* with string pulling in integer math, agents that re-plan
-  when obstacles change.
+- Deterministic navigation: a walkability grid with ground heights baked from a terrain (steep slopes blocked), obstacles,
+  A* with string pulling in integer math, agents that walk on the ground and re-plan when obstacles change.
 - Stats: attributes with flat, additive and multiplicative modifiers (timed, non-stacking, removed with their source),
   resources such as health with one-tick damage and healing and an attribute as their cap, bonuses a player or squad
   grants to all of its units; recalculated only where something changed.

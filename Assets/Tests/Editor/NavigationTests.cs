@@ -313,6 +313,103 @@ namespace Pragma.Lockstep.Tests
         }
 
         [Test]
+        public void Heights_AreBilinearInsideACellAndTakeTheEdgeOutsideTheGrid()
+        {
+            var grid = CreateGrid();
+            var heights = new NativeArray<LockstepNavHeight>(grid.CornerCount, Allocator.Temp);
+            // A plane: world Y = (x + 10) / 2 + (z + 10) / 4, which bilinear interpolation reproduces.
+            for (var z = 0; z <= grid.height; z++)
+            {
+                for (var x = 0; x <= grid.width; x++)
+                {
+                    heights[grid.GetCornerIndex(new int2(x, z))] = new LockstepNavHeight { value = (FixedPoint)x / 4 + (FixedPoint)z / 8 };
+                }
+            }
+
+            Assert.IsTrue(LockstepNavigation.HasHeights(grid, heights));
+            Assert.IsFalse(LockstepNavigation.HasHeights(grid, heights.GetSubArray(0, grid.CellCount)));
+            var inside = new FixedVector2(FixedPoint.FromFraction(13, 10), FixedPoint.FromFraction(-27, 10));
+            Assert.AreEqual(11.3 / 2 + 7.3 / 4, (double)LockstepNavigation.GetHeight(grid, heights, inside), 1e-3);
+            Assert.AreEqual((double)LockstepNavigation.GetHeight(grid, heights, new FixedVector2(10, 2)),
+                (double)LockstepNavigation.GetHeight(grid, heights, new FixedVector2(25, 2)), 1e-9, "beyond the grid the ground of its edge");
+            var grounded = LockstepNavigation.ToGround(grid, heights, new FixedVector3(FixedPoint.FromFraction(13, 10), 50, FixedPoint.FromFraction(-27, 10)));
+            Assert.AreEqual(LockstepNavigation.GetHeight(grid, heights, inside), grounded.y);
+            Assert.AreEqual(new FixedVector3(1, 7, 2), LockstepNavigation.ToGround(grid, default, new FixedVector3(1, 7, 2)), "without heights the Y stays");
+        }
+
+        [Test]
+        public void SteepGround_BlocksItsCellsForGood()
+        {
+            using (var simulation = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
+            {
+                var entityManager = simulation.World.EntityManager;
+                var grid = CreateGrid(entityManager);
+                var state = entityManager.GetComponentData<LockstepNavGrid>(grid);
+                state.maxSlope = FixedPoint.One;
+                entityManager.SetComponentData(grid, state);
+                // Corner columns 0-20 are at 0 and 21-40 at 2: the column of cells 20 between them rises 2 over half a unit.
+                // Corner columns 30-40 rise by a quarter more per column: a gentle slope.
+                var heights = entityManager.AddBuffer<LockstepNavHeight>(grid);
+                for (var z = 0; z <= state.height; z++)
+                {
+                    for (var x = 0; x <= state.width; x++)
+                    {
+                        var height = x <= 20 ? FixedPoint.Zero : 2 + (FixedPoint)math.max(0, x - 30) / 4;
+                        heights.Add(new LockstepNavHeight { value = height });
+                    }
+                }
+                var wall = CreateWall(entityManager, new FixedVector2(0, 0), new FixedVector2(2, 2));
+                TestUtility.Step(simulation);
+                entityManager.DestroyEntity(wall);
+                TestUtility.Step(simulation);
+
+                var cells = entityManager.GetBuffer<LockstepNavCell>(grid);
+                for (var i = 0; i < cells.Length; i++)
+                {
+                    var cell = state.GetCell(i);
+                    Assert.AreEqual(cell.x == 20, !cells[i].IsWalkable, $"cell {cell}: only the cliff is blocked, the released wall is not");
+                }
+            }
+        }
+
+        [Test]
+        public void Agent_WalksOverAHillOnTheGround()
+        {
+            using (var simulation = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
+            {
+                var entityManager = simulation.World.EntityManager;
+                var grid = CreateGrid(entityManager);
+                var state = entityManager.GetComponentData<LockstepNavGrid>(grid);
+                // A ridge along Z, 3 units high at X = 0, sloping one to one down to the plain.
+                var buffer = entityManager.AddBuffer<LockstepNavHeight>(grid);
+                for (var z = 0; z <= state.height; z++)
+                {
+                    for (var x = 0; x <= state.width; x++)
+                    {
+                        var worldX = state.origin.x + state.cellSize * x;
+                        buffer.Add(new LockstepNavHeight { value = FixedMath.Max(FixedPoint.Zero, 3 - FixedMath.Abs(worldX)) });
+                    }
+                }
+                var destination = new FixedVector3(6, 5, 0);
+                var agent = CreateAgent(entityManager, Point(-6, 0), 4, destination);
+
+                var top = FixedPoint.Zero;
+                for (var tick = 0; tick < 200 && entityManager.GetComponentData<LockstepNavAgent>(agent).status != LockstepNavStatus.Arrived; tick++)
+                {
+                    TestUtility.Step(simulation);
+                    var position = Position(entityManager, agent);
+                    var heights = entityManager.GetBuffer<LockstepNavHeight>(grid).AsNativeArray();
+                    Assert.AreEqual(LockstepNavigation.GetHeight(state, heights, position.Xz), position.y, $"tick {tick}: the agent stands on the ground");
+                    top = FixedMath.Max(top, position.y);
+                }
+
+                Assert.AreEqual(LockstepNavStatus.Arrived, entityManager.GetComponentData<LockstepNavAgent>(agent).status);
+                Assert.AreEqual(new FixedVector3(6, 0, 0), Position(entityManager, agent), "it arrives on the ground, not at the height of its destination");
+                Assert.Greater((double)top, 2.5, "it climbed the ridge");
+            }
+        }
+
+        [Test]
         public void Obstacles_BlockCellsWhileTheirEntitiesLive()
         {
             using (var simulation = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
@@ -706,7 +803,18 @@ namespace Pragma.Lockstep.Tests
             options.Initialize = world =>
             {
                 var entityManager = world.EntityManager;
-                CreateGrid(entityManager, FixedPoint.FromFraction(1, 4));
+                var grid = CreateGrid(entityManager, FixedPoint.FromFraction(1, 4));
+                // A round hill in the middle, two units high: the agents walk over it, and end on the plain at Y 0.
+                var state = entityManager.GetComponentData<LockstepNavGrid>(grid);
+                var heights = entityManager.AddBuffer<LockstepNavHeight>(grid);
+                for (var z = 0; z <= state.height; z++)
+                {
+                    for (var x = 0; x <= state.width; x++)
+                    {
+                        var corner = state.origin + new FixedVector2(state.cellSize * x, state.cellSize * z);
+                        heights.Add(new LockstepNavHeight { value = FixedMath.Max(FixedPoint.Zero, 2 - FixedMath.LengthSquared(corner) / 8) });
+                    }
+                }
                 CreateWall(entityManager, new FixedVector2(-2, 3), new FixedVector2(1, 8));
                 for (var i = 0; i < 6; i++)
                 {

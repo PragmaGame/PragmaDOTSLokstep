@@ -6,7 +6,8 @@ namespace Pragma.Lockstep.Navigation
 {
     /// <summary>
     /// The walkability grid on the XZ plane that agents plan their paths on, a singleton in the simulation world. Its
-    /// cells are the <see cref="LockstepNavCell"/> buffer of the same entity.
+    /// cells are the <see cref="LockstepNavCell"/> buffer of the same entity, and the ground agents walk on is its optional
+    /// <see cref="LockstepNavHeight"/> buffer.
     /// </summary>
     /// <remarks>
     /// Cell (x, y) starts at world X <c>origin.x + x * cellSize</c> and world Z <c>origin.y + y * cellSize</c> and is one
@@ -28,10 +29,19 @@ namespace Pragma.Lockstep.Navigation
         /// centres of agents that far from obstacles.
         /// </summary>
         public FixedPoint agentRadius;
+        /// <summary>
+        /// The steepest ground agents walk on, as rise over run (1 is 45 degrees): a cell two neighbouring
+        /// <see cref="LockstepNavHeight"/> corners of which differ by more than this times the cell size is blocked. Zero
+        /// leaves every slope walkable.
+        /// </summary>
+        public FixedPoint maxSlope;
         /// <summary>Changes whenever a cell does. Agents check their paths again when it changes.</summary>
         public uint version;
 
         public int CellCount => width * height;
+
+        /// <summary>Number of cell corners: the length of the <see cref="LockstepNavHeight"/> buffer.</summary>
+        public int CornerCount => (width + 1) * (height + 1);
 
         public bool IsValid => width > 0 && height > 0 && cellSize.rawValue > 0;
 
@@ -40,6 +50,9 @@ namespace Pragma.Lockstep.Navigation
         public int GetIndex(int2 cell) => cell.y * width + cell.x;
 
         public int2 GetCell(int index) => new int2(index % width, index / width);
+
+        /// <summary>Index of corner (x, y) in the <see cref="LockstepNavHeight"/> buffer; corner (x, y) is where cell (x, y) starts.</summary>
+        public int GetCornerIndex(int2 corner) => corner.y * (width + 1) + corner.x;
 
         /// <summary>The cell that holds a world position (X and Z); it may lie outside the grid.</summary>
         public int2 WorldToCell(FixedVector2 position)

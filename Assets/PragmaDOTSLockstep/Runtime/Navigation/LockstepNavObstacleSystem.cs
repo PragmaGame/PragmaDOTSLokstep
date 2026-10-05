@@ -12,7 +12,8 @@ namespace Pragma.Lockstep.Navigation
     /// Cells count the obstacles over them, so stamping and releasing commute and the cells do not depend on the order
     /// obstacles are visited in. The rectangle an obstacle stamped is kept in a cleanup component,
     /// <see cref="LockstepNavObstacleFootprint"/>, which is how a destroyed obstacle still knows which cells to release.
-    /// A new grid, or one whose size changed, is stamped again from scratch.
+    /// A new grid, or one whose size changed, is stamped again from scratch, starting with one blocker on every cell of its
+    /// ground that is too steep to walk on (<see cref="LockstepNavigation.IsSteep"/>): steep ground blocks for good.
     /// </remarks>
     [UpdateInGroup(typeof(LockstepNavSystemGroup), OrderFirst = true)]
     [BurstCompile]
@@ -49,9 +50,13 @@ namespace Pragma.Lockstep.Navigation
             var cells = buffer.AsNativeArray();
             if (isRebuilt)
             {
+                var heights = SystemAPI.HasBuffer<LockstepNavHeight>(gridEntity)
+                    ? SystemAPI.GetBuffer<LockstepNavHeight>(gridEntity).AsNativeArray()
+                    : default;
                 for (var i = 0; i < cells.Length; i++)
                 {
-                    cells[i] = default;
+                    var isSteep = heights.IsCreated && LockstepNavigation.IsSteep(grid, heights, grid.GetCell(i));
+                    cells[i] = new LockstepNavCell { blockers = (ushort)(isSteep ? 1 : 0) };
                 }
             }
 

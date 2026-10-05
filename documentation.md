@@ -280,7 +280,11 @@ These came up while building on Entities; neither reference package deals with t
     push is a function of the pair alone and the pushes of an agent are summed in integer math, so the result does
     not depend on the visiting order; positions are read from a copy taken before any agent moves. Predictive
     avoidance (RVO) would steer agents around each other before they touch, at the cost of velocity state and an
-    iteration whose result depends on its order.
+    iteration whose result depends on its order. The ground is part of the grid: fixed-point heights at the cell
+    corners, baked from a terrain, so a unit's Y is simulation state every client computes alike (bilinear inside a
+    cell) instead of something each renderer guesses. Agents walk on the XZ plane and take the ground's height after
+    every step and push; slopes steeper than a limit block their cells for good when the cells are built, the way the
+    gradient-based impassability map of classic RTS editors does, so pathfinding and placement need no extra rule.
 
 12. **Command data next to the commands.** A buffer element has a fixed size, so the payload struct stays inline
     (up to 122 bytes) and lists of any length (the unit ids of an order) go to a second buffer, `LockstepCommandData`,

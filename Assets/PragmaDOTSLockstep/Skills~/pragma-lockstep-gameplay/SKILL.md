@@ -269,6 +269,11 @@ Units that walk around obstacles use `Pragma.Lockstep.Navigation` (assembly refe
 
 - **Grid.** One `LockstepNavGrid` per simulation world, baked with `LockstepNavGridAuthoring` into the map subscene
   (a scene entity): size, cell size, agent radius. Its `LockstepNavCell` buffer counts the obstacles over each cell.
+- **Ground.** For hilly maps the authoring samples a `TerrainData` (world Y, steepest walkable slope in degrees) into the
+  `LockstepNavHeight` buffer: agents walk on the ground (Y is set by navigation, never walked to), cells steeper than
+  `LockstepNavGrid.maxSlope` are blocked for good. Put whatever you place on the map on the ground with
+  `LockstepNavigation.ToGround(grid, heights, position)` (spawned units, buildings); compare positions on X and Z only,
+  since Y now depends on the ground.
 - **Obstacles.** `LockstepNavObstacleAuthoring`: on a prefab next to `LockstepTransformAuthoring` the rectangle follows
   the entity (buildings); on a static map object next to `LockstepSceneEntityAuthoring` the pose is baked. Cells are
   blocked while the entity exists; destroying it releases them on the next tick. Keep renderers off scene obstacles.

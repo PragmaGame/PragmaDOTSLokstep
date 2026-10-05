@@ -69,8 +69,9 @@ It is a poor fit for:
   to land just in time. Confirmed frames go through a jitter-aware playout buffer with a catch-up budget.
 - **Desync detection.** Clients hash their whole simulation state; the server compares the hashes by majority and
   tells everybody which client diverged. A per-component breakdown shows what diverged.
-- **Navigation.** A walkability grid, obstacles that block it while their entity exists, A* with string pulling in
-  integer math and agents that walk the paths in `FixedPoint`, planning again when obstacles change.
+- **Navigation.** A walkability grid with ground heights baked from a terrain (steep slopes blocked), obstacles that
+  block it while their entity exists, A* with string pulling in integer math and agents that walk the paths on the
+  ground in `FixedPoint`, planning again when obstacles change.
 - **Stats.** Attributes with flat, additive and multiplicative modifiers (timed or lasting until their source removes
   them, stacking or not) and resources capped by an attribute, changed by one-tick changes such as damage; modifiers a
   player or a squad grants to all of its units, the later ones included. In `FixedPoint`, recalculated only where
@@ -720,22 +721,27 @@ The editor converts once and stores raw values.
 ## Navigation
 
 `Pragma.Lockstep.Navigation` walks units around obstacles inside the simulation: a walkability grid on the XZ plane,
-A* in integer math, string pulling, and agents that follow the paths in `FixedPoint`. NavMesh cannot drive gameplay in
+with optional ground heights, A* in integer math, string pulling, and agents that follow the paths in `FixedPoint`. NavMesh cannot drive gameplay in
 lockstep: it works in floats, is built per platform and answers differently on different machines.
 
 | Type | What it is |
 |---|---|
-| `LockstepNavGrid` | Singleton: origin, cell size, width, height, agent radius and a version that changes with the cells. The cells are the `LockstepNavCell` buffer of the same entity: the number of obstacles over each cell |
+| `LockstepNavGrid` | Singleton: origin, cell size, width, height, agent radius, the steepest walkable slope (`maxSlope`, rise over run) and a version that changes with the cells. The cells are the `LockstepNavCell` buffer of the same entity: the number of obstacles over each cell |
+| `LockstepNavHeight` | Optional buffer on the grid entity: world Y of the ground at every cell corner (`CornerCount`, row by row along X). Agents walk on it, and cells steeper than `maxSlope` are blocked for good |
 | `LockstepNavObstacle` | A rectangle (center, size) in the space of the entity's `LockstepTransform` (yaw and uniform scale apply), or in world space without one. It blocks every cell whose centre is within the agent radius of it |
 | `LockstepNavAgent` | Speed, angular speed, stopping distance and body radius of a unit that walks, its destination and status (`Idle`, `Requested`, `Moving`, `Arrived`). The path is its `LockstepNavWaypoint` buffer |
 | `LockstepNavSystemGroup` | Inside `LockstepSimulationSystemGroup`: `LockstepNavObstacleSystem` stamps obstacles, `LockstepNavPathSystem` plans and checks paths in parallel, `LockstepNavMoveSystem` walks agents, `LockstepNavSeparationSystem` pushes overlapping agents apart |
-| `LockstepPathfinder`, `LockstepNavigation` | The search and the grid queries (`IsWalkable`, `HasLineOfSight`, `TryFindNearestWalkable`, `IsClear`, `Covers`, `GetCoverage`, `Stamp`) for systems of your own |
+| `LockstepPathfinder`, `LockstepNavigation` | The search and the grid queries (`IsWalkable`, `HasLineOfSight`, `TryFindNearestWalkable`, `IsClear`, `Covers`, `GetCoverage`, `Stamp`) and the ground queries (`HasHeights`, `GetHeight`, `ToGround`, `IsSteep`) for systems of your own |
 
 ### Setting it up
 
 1. Add a `LockstepNavGridAuthoring` to the subscene of the map (it brings a `LockstepSceneEntityAuthoring`): the size
-   in world units, centred on the GameObject, the cell size and the agent radius. Selecting it previews the cells the
-   obstacles of the open scenes block.
+   in world units, centred on the GameObject, the cell size and the agent radius. For ground that is not flat, give it
+   the `TerrainData` of the map, the world Y of the terrain and the steepest walkable slope in degrees: the terrain is
+   sampled at every cell corner when the subscene bakes, and editing it bakes the grid again. Place the terrain so that
+   it covers the grid exactly (its corner at the grid's corner, its size the grid's size); Entities Graphics does not
+   draw terrains, so the terrain object itself stays in the main scene. Selecting the grid previews the cells the
+   obstacles of the open scenes block (red) and the steep ground blocks (yellow).
 2. Give obstacles a `LockstepNavObstacleAuthoring`. On a prefab with a `LockstepTransformAuthoring` the rectangle moves
    and turns with the entity (buildings spawned from the registry). On a static map object, add a
    `LockstepSceneEntityAuthoring`: the pose is baked, non-uniform scale included. Scene entities are copied whole into
@@ -782,9 +788,16 @@ walkable. Footprints that are not in the grid yet (two buildings placed on one t
   updates the cells on the next navigation update and changes `LockstepNavGrid.version`; walking agents then check the
   rest of their path and plan again when it is blocked. Partial paths are planned again on every change, since the
   destination may have opened up.
-- **Walking.** Agents walk at `speed`, keep it through corners, turn to face where they walk (`angularSpeed` radians per
-  second; zero turns at once), stop `stoppingDistance` before the end of the path and become `Arrived`. Y follows the
-  destination's height. Without a grid agents walk straight to the destination.
+- **Walking.** Agents walk on the XZ plane at `speed`, keep it through corners, turn to face where they walk
+  (`angularSpeed` radians per second; zero turns at once), stop `stoppingDistance` before the end of the path and
+  become `Arrived`. With ground heights, the Y of a walking or pushed agent is the ground under it (bilinear inside a
+  cell); without them it stays as it is: the Y of the destination is never walked to. Without a grid agents walk
+  straight to the destination.
+- **Ground.** `LockstepNavigation.GetHeight` is the height of the ground at any X and Z (the edge of the grid beyond
+  it), `ToGround` puts a position on it: use them for whatever you place on the map (spawned units, buildings). A cell
+  two neighbouring corners of which differ by more than `maxSlope` times the cell size is steep: the grid blocks it with
+  one permanent blocker when it builds its cells, so paths, `IsClear` and stepping out of obstacles all treat steep
+  ground as an obstacle. Heights are static: they are read when the cells are built.
 - **Keeping apart.** After they walked, agents closer than the sum of their `radius` are pushed apart by half of the
   overlap per tick (an agent at most by its radius), so a crowd that met on one point spreads out over a few ticks
   instead of jumping. Two walking or two standing agents share the push equally; a walking agent takes three quarters
