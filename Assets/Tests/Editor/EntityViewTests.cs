@@ -323,6 +323,35 @@ namespace Pragma.Lockstep.Tests
         }
 
         [Test]
+        public void HiddenWorlds_ReturnTheirViewsAndShowTheCurrentState()
+        {
+            using (var session = new SessionHarness(Settings()))
+            using (var views = new ViewHarness())
+            {
+                var client = AddClient(session);
+                views.Show(client);
+                views.Run(session, client, 5);
+                var view = views.SpawnedView();
+
+                views.ManagerSystem.IsShown = false;
+                Assert.AreEqual(0, views.Manager.Views.Count, "hiding returns the views at once");
+                Assert.IsFalse(view.IsBound);
+                Assert.IsFalse(view.gameObject.activeSelf);
+
+                views.Run(session, client, 24);
+                Assert.AreEqual(0, views.Manager.Views.Count, "a hidden world spawns nothing");
+
+                views.ManagerSystem.IsShown = true;
+                views.Update();
+                var shown = views.SpawnedView();
+                Assert.AreSame(view, shown, "the pooled instance comes back");
+                Assert.AreEqual(SimulatedEntity(client), shown.Entity);
+                CollectionAssert.AreEqual(new[] { 0, 2 }, shown.GetComponent<TestViewDataRawView>().values,
+                    "nothing is pushed while hidden, and the view shown again starts from the current value");
+            }
+        }
+
+        [Test]
         public void PausedViews_ComeBackFromThePoolAwake()
         {
             using (var session = new SessionHarness(Settings()))

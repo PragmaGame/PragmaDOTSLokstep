@@ -96,6 +96,8 @@ first, then new entities get theirs. A new session returns every view.
   `IDisposable`. To share one pool, return a thin wrapper per world.
 - Per world: `world.GetExistingSystemManaged<EntityViewManagerSystem>().Pool = pool`; the spawned views go back to the
   previous pool first and the caller keeps ownership.
+- Several presentation worlds in one process (local players, a spectator): `managerSystem.IsShown = false` returns
+  that world's views to the pool at once and spawns none until it is shown again, with the views of the current state.
 - Default `EntityViewPool(name, parent)`: inactive instances under one root object (kept across scene loads in play
   mode), `Prewarm(prefab, count)`, `InactiveCount`, `Dispose()` destroys every instance.
 - com.pragma.pool keeps `PrefabPoolObject`s: give each view prefab one next to its `EntityView` and adapt:

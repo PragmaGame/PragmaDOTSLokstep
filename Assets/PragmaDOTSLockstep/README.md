@@ -1177,6 +1177,11 @@ state for as many ticks as the animation lasts (a countdown in the simulation, t
 leave an effect behind in `BindBreak`. To take the view away from an entity that stays (a unit inside a transport), set
 its key to `default`: a key no catalog binds gets no view.
 
+Several presentation worlds can run in one process (the local players of a hot-seat test, a spectator next to a
+player), and each one shows its own session. To show one of them, hide the others: `managerSystem.IsShown = false`
+returns the views of that world to the pool at once, and a hidden world spawns none; shown again, it spawns the views
+of the current state.
+
 #### The view pool
 
 Views come from an `IEntityViewPool` with two methods, `Spawn(prefab)` and `Release(view)`; the manager binds and

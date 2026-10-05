@@ -19,6 +19,8 @@ and this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pool abstraction: `IEntityViewPool`, chosen per project with `EntityViewManagerSystem.PoolFactory` or per world with
   `EntityViewManagerSystem.Pool`; `EntityViewPool` is the default.
 - `EntityViewManager`: views by entity, `Attach`/`Detach` for views the caller owns (HUD panels), `ForceUpdate`.
+- `EntityViewManagerSystem.IsShown`: a hidden presentation world returns its views to the pool and spawns none until it
+  is shown again, so one process can run several presentation worlds and show one of them.
 - `EntityView.TryGetData<T>` and `TryGetBuffer<T>`: read a component or a buffer of the entity shown from the
   simulation world (its `LockstepEntityId` for commands).
 - `LockstepTransformExtensions.TryGetInterpolated`: reads and interpolates the transform of a simulation entity with the

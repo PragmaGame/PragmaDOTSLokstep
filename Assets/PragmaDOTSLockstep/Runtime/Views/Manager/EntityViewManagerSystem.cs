@@ -38,6 +38,7 @@ namespace Pragma.Lockstep.Views
         private int _keyOrderVersion;
         private bool _isScanRequired;
         private int _scanStamp;
+        private bool _isShown = true;
 
         /// <summary>
         /// Creates the pool of every presentation world. Set it once per project from the game's bootstrap, before
@@ -52,6 +53,28 @@ namespace Pragma.Lockstep.Views
 
         /// <summary>The views of this world, by simulation entity.</summary>
         public EntityViewManager Manager => _manager;
+
+        /// <summary>
+        /// Whether this world shows its session. Hiding returns every view to the pool at once, and a hidden world spawns
+        /// none; shown again, it spawns the views of the current state. One process can run several presentation worlds
+        /// (the local players of a hot-seat test, a spectator) and show one of them.
+        /// </summary>
+        public bool IsShown
+        {
+            get => _isShown;
+            set
+            {
+                if (_isShown == value)
+                {
+                    return;
+                }
+                _isShown = value;
+                if (!value)
+                {
+                    EndSession();
+                }
+            }
+        }
 
         /// <summary>
         /// The pool of this world: the one from <see cref="PoolFactory"/>, or one set here. Setting it returns the spawned
@@ -101,6 +124,10 @@ namespace Pragma.Lockstep.Views
             {
                 RebuildCatalog();
                 _isScanRequired = true;
+            }
+            if (!_isShown)
+            {
+                return;
             }
 
             LockstepWorlds.TryGetClient(World, out var client);
