@@ -10,8 +10,9 @@ namespace Pragma.Lockstep.Navigation
     /// <remarks>
     /// Call <see cref="SetDestination"/> from a simulation system that updates before <see cref="LockstepNavSystemGroup"/>,
     /// and the agent plans its path and takes its first step on the same tick. The path is the
-    /// <see cref="LockstepNavWaypoint"/> buffer of the entity. Without a grid in the world agents walk straight. Agents do
-    /// not avoid each other.
+    /// <see cref="LockstepNavWaypoint"/> buffer of the entity. Without a grid in the world agents walk straight. Agents with a
+    /// <see cref="radius"/> push each other apart where they overlap (<see cref="LockstepNavSeparationSystem"/>); paths do
+    /// not go around other agents.
     /// </remarks>
     public struct LockstepNavAgent : IComponentData
     {
@@ -21,6 +22,11 @@ namespace Pragma.Lockstep.Navigation
         public FixedPoint angularSpeed;
         /// <summary>The agent stops when it is this close to the end of its path.</summary>
         public FixedPoint stoppingDistance;
+        /// <summary>
+        /// Radius of the agent's body: agents closer than the sum of their radii are pushed apart. Zero neither pushes nor
+        /// is pushed.
+        /// </summary>
+        public FixedPoint radius;
 
         public FixedVector3 destination;
         public LockstepNavStatus status;

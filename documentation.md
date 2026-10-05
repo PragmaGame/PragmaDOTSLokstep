@@ -259,7 +259,10 @@ These came up while building on Entities; neither reference package deals with t
     simulation must never read. Like the prefab registry, they are copied into the simulation world before tick 0
     (`LockstepSceneEntity`), the counterpart of Netcode's pre-spawned ghosts. The copy is sorted by an order baked
     from each object's `GlobalObjectId`, because the query order of the presentation world follows the order its
-    subscene sections loaded in, which may differ between clients.
+    subscene sections loaded in, which may differ between clients. The archetypes of the copies are created in that
+    order before the copy: `CopyEntitiesFrom` moves chunks in an order that depends on where the source allocated them,
+    and the order of archetypes is state that queries and the checksum walk. The prefab registry is copied the same
+    way.
 
 11. **Navigation on a grid.** RTS units need paths around buildings, and NavMesh is float-based and built per
     platform. `Pragma.Lockstep.Navigation` keeps a walkability grid in the simulation world as plain state: a buffer
@@ -271,7 +274,13 @@ These came up while building on Entities; neither reference package deals with t
     grid and its own agent, so the thread count cannot change a result. Walking agents re-check their remaining
     segments when the grid version changes and plan again only when they are blocked. A grid was chosen over a
     fixed-point navmesh because it is simple to keep exact, cheap to change at run time (buildings) and easy to hash;
-    a navmesh with a funnel algorithm would give smoother paths on large open maps.
+    a navmesh with a funnel algorithm would give smoother paths on large open maps. Agents keep apart by separation,
+    not by avoidance: after they walked, overlapping agents are pushed apart by half of the overlap per tick, a walking
+    agent taking three quarters of it from a standing one so that units holding a place are not swept along. Each
+    push is a function of the pair alone and the pushes of an agent are summed in integer math, so the result does
+    not depend on the visiting order; positions are read from a copy taken before any agent moves. Predictive
+    avoidance (RVO) would steer agents around each other before they touch, at the cost of velocity state and an
+    iteration whose result depends on its order.
 
 12. **Command data next to the commands.** A buffer element has a fixed size, so the payload struct stays inline
     (up to 122 bytes) and lists of any length (the unit ids of an order) go to a second buffer, `LockstepCommandData`,
@@ -322,6 +331,7 @@ These came up while building on Entities; neither reference package deals with t
   re-simulated when frames arrive.
 - **Snapshot late join**: serialize the confirmed world for joiners of long matches.
 - **Deterministic physics** on `FixedPoint`.
-- **Navigation**: local avoidance between agents, flow fields for large groups, cell costs, several agent sizes.
+- **Navigation**: predictive avoidance between agents (they only separate once they overlap), flow fields for large
+  groups, cell costs, paths for several agent sizes.
 - **Input compression** for large input structs.
 - **Diff tooling**: a window that compares per-component hashes and entity dumps of two clients side by side.

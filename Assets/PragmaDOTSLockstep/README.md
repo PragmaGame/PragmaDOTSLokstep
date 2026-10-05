@@ -517,8 +517,8 @@ foreach (var (player, commands, commandData) in
 - Scene entities: what a map starts with (buildings, resource nodes, spawn markers) is placed in that subscene like
   any scene object and gets a `LockstepSceneEntityAuthoring`. The built-in systems copy every `LockstepSceneEntity` of
   the presentation world (with its linked entities) into the simulation before tick 0, sorted by an order baked from
-  the object's identity in its scene, so every client starts from the same entities whatever order its subscenes
-  loaded in. References between scene entities are kept; references to anything else, registry prefabs included,
+  the object's identity in its scene, so every client starts from the same entities, in archetypes created in the same
+  order, whatever order its subscenes loaded in. References between scene entities are kept; references to anything else, registry prefabs included,
   become `Entity.Null`, so a scene entity names a prefab by registry index or by a key of your own. Only GameObject
   views show scene entities: `LockstepViewSystem` mirrors registry instances only, and the presentation world keeps
   its own inert copy of the baked entity.
@@ -727,8 +727,8 @@ lockstep: it works in floats, is built per platform and answers differently on d
 |---|---|
 | `LockstepNavGrid` | Singleton: origin, cell size, width, height, agent radius and a version that changes with the cells. The cells are the `LockstepNavCell` buffer of the same entity: the number of obstacles over each cell |
 | `LockstepNavObstacle` | A rectangle (center, size) in the space of the entity's `LockstepTransform` (yaw and uniform scale apply), or in world space without one. It blocks every cell whose centre is within the agent radius of it |
-| `LockstepNavAgent` | Speed, angular speed and stopping distance of a unit that walks, its destination and status (`Idle`, `Requested`, `Moving`, `Arrived`). The path is its `LockstepNavWaypoint` buffer |
-| `LockstepNavSystemGroup` | Inside `LockstepSimulationSystemGroup`: `LockstepNavObstacleSystem` stamps obstacles, `LockstepNavPathSystem` plans and checks paths in parallel, `LockstepNavMoveSystem` walks agents |
+| `LockstepNavAgent` | Speed, angular speed, stopping distance and body radius of a unit that walks, its destination and status (`Idle`, `Requested`, `Moving`, `Arrived`). The path is its `LockstepNavWaypoint` buffer |
+| `LockstepNavSystemGroup` | Inside `LockstepSimulationSystemGroup`: `LockstepNavObstacleSystem` stamps obstacles, `LockstepNavPathSystem` plans and checks paths in parallel, `LockstepNavMoveSystem` walks agents, `LockstepNavSeparationSystem` pushes overlapping agents apart |
 | `LockstepPathfinder`, `LockstepNavigation` | The search and the grid queries (`IsWalkable`, `HasLineOfSight`, `TryFindNearestWalkable`, `IsClear`, `Covers`, `GetCoverage`, `Stamp`) for systems of your own |
 
 ### Setting it up
@@ -740,7 +740,8 @@ lockstep: it works in floats, is built per platform and answers differently on d
    and turns with the entity (buildings spawned from the registry). On a static map object, add a
    `LockstepSceneEntityAuthoring`: the pose is baked, non-uniform scale included. Scene entities are copied whole into
    the simulation, so keep renderers off the obstacle's GameObject (a child works).
-3. Give units a `LockstepNavAgentAuthoring` (next to a `LockstepTransformAuthoring`).
+3. Give units a `LockstepNavAgentAuthoring` (next to a `LockstepTransformAuthoring`), with the radius of their body if
+   they should not stand inside each other.
 4. Set destinations from a system that updates before `LockstepNavSystemGroup`; the agent plans its path and takes its
    first step on the same tick:
 
@@ -784,15 +785,27 @@ walkable. Footprints that are not in the grid yet (two buildings placed on one t
 - **Walking.** Agents walk at `speed`, keep it through corners, turn to face where they walk (`angularSpeed` radians per
   second; zero turns at once), stop `stoppingDistance` before the end of the path and become `Arrived`. Y follows the
   destination's height. Without a grid agents walk straight to the destination.
+- **Keeping apart.** After they walked, agents closer than the sum of their `radius` are pushed apart by half of the
+  overlap per tick (an agent at most by its radius), so a crowd that met on one point spreads out over a few ticks
+  instead of jumping. Two walking or two standing agents share the push equally; a walking agent takes three quarters
+  of it from a standing one, so it slides past units that hold their place and still makes its way to a destination
+  one of them stands on. A push never ends on a blocked cell: it is cut to its walkable X or Z part, or dropped. Agents
+  with a zero radius take no part. Paths are not planned around other agents: a pushed agent walks on to its next
+  waypoint from where it stands, and agents sent to one point crowd around it.
 - **Determinism.** Integer and `FixedPoint` math only, a heap with a strict total order, and paths that depend only on
   the grid and their own agent, so planning in parallel gives the same result on any number of threads. Cells count
-  obstacles, so the order obstacles are stamped in does not matter. Burst and Mono find bit-identical paths.
+  obstacles, so the order obstacles are stamped in does not matter. Burst and Mono find bit-identical paths. An
+  agent's push is a sum of pair pushes in exact integer math, so the order agents are visited in does not matter
+  either; agents on the very same point split along directions picked by their order in the query, which every client
+  shares.
 
 ### Cost
 
 A search visits each cell at most once and stops at the destination. Its cost grows with the area between start and
 destination; an unreachable destination makes it visit the whole reachable area. Paths are planned in a parallel job
 with one scratch buffer per chunk, and walking agents only re-check their remaining segments when the grid changes.
+Keeping apart sorts the agents with a radius into a spatial hash once per tick and compares each with the agents of the
+nine hash cells around it.
 Pick the cell size from the narrowest gap units must pass: about the agent radius is a good start.
 
 ## Stats

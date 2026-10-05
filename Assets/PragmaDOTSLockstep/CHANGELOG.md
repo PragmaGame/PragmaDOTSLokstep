@@ -39,7 +39,8 @@ and this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   blocked (a building placed on top of it, a unit spawned or stopped inside one) walks to the nearest walkable cell.
   `LockstepNavigation.IsClear` tells whether a footprint could be stamped without touching a blocked cell (where a
   building may be placed); `Covers` and `GetCoverage` give the cells a footprint blocks, for footprints not stamped
-  yet.
+  yet. Agents with a `radius` keep apart: `LockstepNavSeparationSystem` pushes overlapping agents away from each other
+  after they walked, never onto a blocked cell, in a sum that does not depend on the order agents are visited in.
 - Stats (`Pragma.Lockstep.Stats`), under the game's own stat ids or enum values, in `FixedPoint`:
   - attributes (`LockstepStat.Attribute`): a base value and `LockstepStatModifier`s, flat, additive or multiplicative
     (percentage factors stop at zero), each with a `LockstepStatSource`, an optional end tick and a stacking rule
@@ -67,6 +68,12 @@ and this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version 1 are refused.
 - `LockstepClient` and `LockstepServer` queue commands in their wire form; the server checks the form and relays the
   bytes without decoding them.
+
+### Fixed
+
+- The prefab registry and the scene entities are copied into archetypes created in their order first: the copy alone
+  created them in an order that followed the memory of the presentation world, so two clients could start with their
+  archetypes in a different order and report a desync on tick 0.
 
 ### Removed
 

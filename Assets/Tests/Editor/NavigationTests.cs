@@ -19,6 +19,7 @@ namespace Pragma.Lockstep.Tests
             typeof(LockstepNavObstacleSystem),
             typeof(LockstepNavPathSystem),
             typeof(LockstepNavMoveSystem),
+            typeof(LockstepNavSeparationSystem),
         };
 
         // 40 x 40 cells of half a unit: X and Z from -10 to 10.
@@ -500,6 +501,165 @@ namespace Pragma.Lockstep.Tests
         }
 
         [Test]
+        public void Agents_OnTheSamePoint_SpreadUntilTheyStopOverlapping()
+        {
+            using (var simulation = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
+            {
+                var entityManager = simulation.World.EntityManager;
+                var grid = CreateGrid(entityManager);
+                var start = Point(1, 1);
+                var agents = new Entity[5];
+                for (var i = 0; i < agents.Length; i++)
+                {
+                    agents[i] = CreateAgent(entityManager, start, 4, default, FixedPoint.Half);
+                }
+
+                for (var i = 0; i < 60; i++)
+                {
+                    TestUtility.Step(simulation);
+                }
+                for (var i = 0; i < agents.Length; i++)
+                {
+                    var position = Position(entityManager, agents[i]);
+                    Assert.IsTrue(IsWalkable(entityManager, grid, position));
+                    Assert.Less((double)FixedMath.Distance(position, start), 2.0, "the crowd spreads around where it stood");
+                    for (var j = 0; j < i; j++)
+                    {
+                        var distance = FixedMath.Distance(position, Position(entityManager, agents[j]));
+                        Assert.Greater((double)distance, 0.95, $"agents {j} and {i} still overlap");
+                    }
+                }
+            }
+        }
+
+        [Test]
+        public void Agents_AreNotPushedOntoBlockedCells()
+        {
+            using (var simulation = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
+            {
+                var entityManager = simulation.World.EntityManager;
+                var grid = CreateGrid(entityManager);
+                CreateWall(entityManager, FixedVector2.Zero, new FixedVector2(1, 12));
+                // The right agent stands at the wall: its push goes into it, so only the left one gives way.
+                var left = CreateAgent(entityManager, Point(FixedPoint.FromFraction(-3, 4), 0), 4, default, FixedPoint.Half);
+                var right = CreateAgent(entityManager, Point(FixedPoint.FromFraction(-11, 20), 0), 4, default, FixedPoint.Half);
+
+                for (var tick = 1; tick <= 40; tick++)
+                {
+                    TestUtility.Step(simulation);
+                    Assert.IsTrue(IsWalkable(entityManager, grid, Position(entityManager, left)), $"tick {tick}: left agent on a blocked cell");
+                    Assert.IsTrue(IsWalkable(entityManager, grid, Position(entityManager, right)), $"tick {tick}: right agent on a blocked cell");
+                }
+                // Pushes small enough to keep it on its cell bring it up to the wall, never away from it.
+                Assert.GreaterOrEqual((double)Position(entityManager, right).x, -0.55, "the agent at the wall does not give way");
+                Assert.Greater((double)FixedMath.Distance(Position(entityManager, left), Position(entityManager, right)), 0.95);
+            }
+        }
+
+        [Test]
+        public void Agent_Walking_TakesThreeQuartersOfThePushFromAStandingOne()
+        {
+            using (var simulation = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
+            {
+                var entityManager = simulation.World.EntityManager;
+                CreateGrid(entityManager);
+                var stander = CreateAgent(entityManager, Point(0, 0), 4, default, FixedPoint.Half);
+                // The walker overlaps the stander from the side and walks away along Z.
+                var start = Point(-FixedPoint.Half, 0);
+                var walker = CreateAgent(entityManager, start, 4, Point(-FixedPoint.Half, 8), FixedPoint.Half);
+
+                TestUtility.Step(simulation);
+                var standerShift = (double)Position(entityManager, stander).x;
+                var walkerShift = (double)(start.x - Position(entityManager, walker).x);
+                Assert.Greater(standerShift, 0.0, "the standing agent is pushed a little");
+                Assert.AreEqual(3.0, walkerShift / standerShift, 0.01, "the walking agent gives way three times as much");
+            }
+        }
+
+        [Test]
+        public void Agent_WalkingToWhereAnotherStands_ShouldersItAsideAndArrives()
+        {
+            using (var simulation = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
+            {
+                var entityManager = simulation.World.EntityManager;
+                var grid = CreateGrid(entityManager);
+                var destination = Point(2, 0);
+                var stander = CreateAgent(entityManager, destination, 4, default, FixedPoint.Half);
+                var walker = CreateAgent(entityManager, Point(-2, 0), 4, destination, FixedPoint.Half);
+
+                WalkUntilArrived(simulation, grid, walker, 200);
+                Assert.Greater((double)FixedMath.Distance(Position(entityManager, stander), destination), 0.5, "the standing agent made room");
+            }
+        }
+
+        [Test]
+        public void Agent_WithoutARadius_NeitherPushesNorIsPushed()
+        {
+            using (var simulation = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
+            {
+                var entityManager = simulation.World.EntityManager;
+                CreateGrid(entityManager);
+                var body = CreateAgent(entityManager, Point(2, 2), 4, default, FixedPoint.Half);
+                var ghost = CreateAgent(entityManager, Point(2, 2), 4, default);
+
+                for (var i = 0; i < 10; i++)
+                {
+                    TestUtility.Step(simulation);
+                }
+                Assert.AreEqual(Point(2, 2), Position(entityManager, body));
+                Assert.AreEqual(Point(2, 2), Position(entityManager, ghost));
+            }
+        }
+
+        [Test]
+        public void Separation_DoesNotDependOnTheOrderOfAgents()
+        {
+            var starts = new[]
+            {
+                Point(0, 0),
+                Point(FixedPoint.FromFraction(3, 10), FixedPoint.FromFraction(1, 10)),
+                Point(FixedPoint.FromFraction(-1, 5), FixedPoint.FromFraction(2, 5)),
+                Point(FixedPoint.Half, FixedPoint.FromFraction(-3, 10)),
+                Point(FixedPoint.FromFraction(1, 10), FixedPoint.FromFraction(-3, 5)),
+                Point(FixedPoint.FromFraction(-7, 10), FixedPoint.FromFraction(-1, 10)),
+            };
+            var forward = SeparateFrom(starts, false);
+            var backward = SeparateFrom(starts, true);
+            for (var i = 0; i < starts.Length; i++)
+            {
+                Assert.AreNotEqual(starts[i], forward[i], $"agent {i} was pushed");
+                Assert.AreEqual(forward[i], backward[i], $"agent {i} ends on the same point whatever the order");
+            }
+        }
+
+        // Creates agents of radius 1/2 on the starts (in reverse order if asked), separates them for 20 ticks and returns
+        // their positions in the order of the starts.
+        private static FixedVector3[] SeparateFrom(FixedVector3[] starts, bool reverse)
+        {
+            using (var simulation = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
+            {
+                var entityManager = simulation.World.EntityManager;
+                CreateGrid(entityManager);
+                var agents = new Entity[starts.Length];
+                for (var k = 0; k < starts.Length; k++)
+                {
+                    var i = reverse ? starts.Length - 1 - k : k;
+                    agents[i] = CreateAgent(entityManager, starts[i], 4, default, FixedPoint.Half);
+                }
+                for (var tick = 0; tick < 20; tick++)
+                {
+                    TestUtility.Step(simulation);
+                }
+                var positions = new FixedVector3[starts.Length];
+                for (var i = 0; i < starts.Length; i++)
+                {
+                    positions[i] = Position(entityManager, agents[i]);
+                }
+                return positions;
+            }
+        }
+
+        [Test]
         public void Session_AgentsWalkTheSamePathsOnEveryClient()
         {
             var settings = LockstepServerSettings.Default;
@@ -542,7 +702,7 @@ namespace Pragma.Lockstep.Tests
         private static LockstepSimulationOptions SessionOptions()
         {
             var options = TestUtility.Options(typeof(LockstepNavSystemGroup), typeof(LockstepNavObstacleSystem), typeof(LockstepNavPathSystem),
-                typeof(LockstepNavMoveSystem), typeof(TestNavigationSystem));
+                typeof(LockstepNavMoveSystem), typeof(LockstepNavSeparationSystem), typeof(TestNavigationSystem));
             options.Initialize = world =>
             {
                 var entityManager = world.EntityManager;
@@ -552,7 +712,8 @@ namespace Pragma.Lockstep.Tests
                 {
                     var z = (FixedPoint)(i * 3 - 7);
                     var agent = CreateAgent(entityManager, Point(-8, z), 3 + i, default);
-                    entityManager.SetComponentData(agent, new LockstepNavAgent { speed = 3 + i, angularSpeed = FixedMath.Pi });
+                    // Their ways cross in the middle, where they push each other apart.
+                    entityManager.SetComponentData(agent, new LockstepNavAgent { speed = 3 + i, angularSpeed = FixedMath.Pi, radius = FixedPoint.FromFraction(2, 5) });
                     entityManager.AddComponentData(agent, new TestNavigationTarget { there = Point(8, -z), back = Point(-8, z) });
                 }
             };
@@ -574,11 +735,12 @@ namespace Pragma.Lockstep.Tests
             return wall;
         }
 
-        private static Entity CreateAgent(EntityManager entityManager, FixedVector3 position, FixedPoint speed, FixedVector3 destination)
+        private static Entity CreateAgent(EntityManager entityManager, FixedVector3 position, FixedPoint speed, FixedVector3 destination,
+                                          FixedPoint radius = default)
         {
             var agent = entityManager.CreateEntity(typeof(LockstepTransform), typeof(LockstepNavAgent), typeof(LockstepNavWaypoint));
             entityManager.SetComponentData(agent, LockstepTransform.FromPosition(position));
-            var state = new LockstepNavAgent { speed = speed };
+            var state = new LockstepNavAgent { speed = speed, radius = radius };
             if (destination != default)
             {
                 state.SetDestination(destination);
@@ -603,6 +765,11 @@ namespace Pragma.Lockstep.Tests
             }
             Assert.Fail($"the agent did not arrive in {maxTicks} ticks");
             return maxTicks;
+        }
+
+        private static FixedVector3 Position(EntityManager entityManager, Entity agent)
+        {
+            return entityManager.GetComponentData<LockstepTransform>(agent).position;
         }
 
         private static bool IsWalkable(EntityManager entityManager, Entity grid, FixedVector3 position)

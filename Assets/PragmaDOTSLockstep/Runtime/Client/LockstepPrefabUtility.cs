@@ -67,6 +67,7 @@ namespace Pragma.Lockstep
             var copies = new NativeArray<Entity>(toCopy.Length, Allocator.Temp);
             if (toCopy.Length > 0)
             {
+                CreateArchetypes(source, destination, toCopy.AsArray());
                 destination.CopyEntitiesFrom(source, toCopy.AsArray(), copies);
             }
 
@@ -145,8 +146,24 @@ namespace Pragma.Lockstep
                     }
                 }
             }
+            CreateArchetypes(source, destination, toCopy.AsArray());
             destination.CopyEntitiesFrom(source, toCopy.AsArray());
             return entities.Length;
+        }
+
+        // CopyEntitiesFrom creates the archetypes of the copies in an order of its own: it moves them chunk by chunk, and
+        // which chunk goes first depends on where the source allocated them, which differs between clients. The order of
+        // archetypes is simulation state (queries and the checksum walk archetypes in creation order), so they are
+        // created here first, in the order of the entities, and the copy only fills them.
+        private static void CreateArchetypes(EntityManager source, EntityManager destination, NativeArray<Entity> entities)
+        {
+            for (var i = 0; i < entities.Length; i++)
+            {
+                using (var types = source.GetComponentTypes(entities[i], Allocator.Temp))
+                {
+                    destination.CreateArchetype(types);
+                }
+            }
         }
 
         private static void AddUnique(Entity entity, NativeList<Entity> list, NativeHashMap<Entity, int> index)

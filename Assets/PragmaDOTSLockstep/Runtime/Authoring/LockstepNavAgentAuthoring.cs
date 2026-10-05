@@ -23,6 +23,9 @@ namespace Pragma.Lockstep.Authoring
         [SerializeField, Min(0f), Tooltip("The agent stops this close to the end of its path.")]
         private float _stoppingDistance;
 
+        [SerializeField, Min(0f), Tooltip("Radius of the agent's body: overlapping agents are pushed apart. 0 neither pushes nor is pushed.")]
+        private float _radius;
+
         private sealed class Baker : Baker<LockstepNavAgentAuthoring>
         {
             public override void Bake(LockstepNavAgentAuthoring authoring)
@@ -33,6 +36,7 @@ namespace Pragma.Lockstep.Authoring
                     speed = (FixedPoint)authoring._speed,
                     angularSpeed = FixedMath.ToRadians((FixedPoint)authoring._angularSpeed),
                     stoppingDistance = (FixedPoint)authoring._stoppingDistance,
+                    radius = (FixedPoint)authoring._radius,
                 });
                 AddBuffer<LockstepNavWaypoint>(entity);
             }

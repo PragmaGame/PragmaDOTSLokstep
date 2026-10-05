@@ -125,7 +125,7 @@ to a drive letter with `subst`.
 ## Tests
 
 - `Assets/Tests/Editor` is the EditMode suite: math accuracy and Burst equality, golden results, serialization,
-  checksums, simulation rules, navigation (pathfinder, Burst equality, obstacles, agents, a session), stats (formula,
+  checksums, simulation rules, navigation (pathfinder, Burst equality, obstacles, agents, keeping agents apart, a session), stats (formula,
   non-stacking modifiers, sources, timed modifiers, resources and caps, changes, grants, enum ids in Burst, change
   versions, a session with a late joiner), sessions
   (latency, jitter, late join, disconnects, desync attribution, replays, commands with large data), presentation,

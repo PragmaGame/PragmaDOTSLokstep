@@ -47,6 +47,38 @@ namespace Pragma.Lockstep.Tests
         }
 
         [Test]
+        public void SceneEntities_OfManyArchetypes_StartTheSameStateWhateverOrderTheyLoadedIn()
+        {
+            // A map: rules, a grid, two castles, two spawn points, two walls, three cover zones, each kind its own archetype.
+            var items = new (ulong Order, int Kind)[]
+            {
+                (1, 0), (2, 1), (3, 2), (5, 3), (11, 4), (12, 4), (21, 0), (22, 0), (31, 1), (32, 1), (41, 2), (42, 2), (43, 2),
+            };
+            using (var first = new World("Presentation A"))
+            using (var second = new World("Presentation B"))
+            {
+                for (var i = 0; i < items.Length; i++)
+                {
+                    CreateMapItem(first.EntityManager, items[i].Order, items[i].Kind);
+                    var reversed = items[items.Length - 1 - i];
+                    CreateMapItem(second.EntityManager, reversed.Order, reversed.Kind);
+                }
+
+                using (var a = new LockstepSimulation(TestUtility.Config(), Options(first)))
+                using (var b = new LockstepSimulation(TestUtility.Config(), Options(second)))
+                {
+                    var hashesA = LockstepChecksum.ComputePerType(a.World.EntityManager);
+                    var hashesB = LockstepChecksum.ComputePerType(b.World.EntityManager);
+                    foreach (var pair in hashesA)
+                    {
+                        Assert.AreEqual(pair.Value, hashesB[pair.Key], $"{pair.Key} differs between the clients");
+                    }
+                    Assert.AreEqual(a.ComputeChecksum(), b.ComputeChecksum(), "both clients start from the same state");
+                }
+            }
+        }
+
+        [Test]
         public void SceneEntities_KeepLinkedEntitiesAndTheirReferences()
         {
             using (var presentation = new World("Presentation"))
@@ -105,6 +137,35 @@ namespace Pragma.Lockstep.Tests
             entityManager.SetComponentData(entity, new LockstepSceneEntity { order = order });
             entityManager.SetComponentData(entity, new ChecksumPadded { large = value });
             return entity;
+        }
+
+        // A scene entity of one of five archetypes, made of the test components; its value is its order.
+        private static void CreateMapItem(EntityManager entityManager, ulong order, int kind)
+        {
+            Entity entity;
+            switch (kind)
+            {
+                case 0:
+                    entity = entityManager.CreateEntity(typeof(LockstepSceneEntity), typeof(ChecksumPadded));
+                    break;
+                case 1:
+                    entity = entityManager.CreateEntity(typeof(LockstepSceneEntity), typeof(ChecksumValue));
+                    break;
+                case 2:
+                    entity = entityManager.CreateEntity(typeof(LockstepSceneEntity), typeof(ChecksumPadded), typeof(ChecksumValue));
+                    break;
+                case 3:
+                    entity = entityManager.CreateEntity(typeof(LockstepSceneEntity), typeof(ChecksumValue), typeof(TestSpawnedTag));
+                    break;
+                default:
+                    entity = entityManager.CreateEntity(typeof(LockstepSceneEntity), typeof(ChecksumPadded), typeof(TestSpawnedTag));
+                    break;
+            }
+            entityManager.SetComponentData(entity, new LockstepSceneEntity { order = order });
+            if (entityManager.HasComponent<ChecksumPadded>(entity))
+            {
+                entityManager.SetComponentData(entity, new ChecksumPadded { large = (int)order });
+            }
         }
 
         private static LockstepSimulationOptions Options(World presentationWorld)

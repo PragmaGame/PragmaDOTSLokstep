@@ -272,7 +272,7 @@ Units that walk around obstacles use `Pragma.Lockstep.Navigation` (assembly refe
 - **Obstacles.** `LockstepNavObstacleAuthoring`: on a prefab next to `LockstepTransformAuthoring` the rectangle follows
   the entity (buildings); on a static map object next to `LockstepSceneEntityAuthoring` the pose is baked. Cells are
   blocked while the entity exists; destroying it releases them on the next tick. Keep renderers off scene obstacles.
-- **Agents.** `LockstepNavAgentAuthoring` (speed, angular speed in degrees, stopping distance). Gameplay calls
+- **Agents.** `LockstepNavAgentAuthoring` (speed, angular speed in degrees, stopping distance, body radius). Gameplay calls
   `agent.ValueRW.SetDestination(target)` from a system with `[UpdateBefore(typeof(LockstepNavSystemGroup))]` and reads
   `status` (`Requested`, `Moving`, `Arrived`) and `isPathPartial`. Never write `LockstepTransform` of a walking agent
   yourself; call `Stop()` first.
@@ -282,7 +282,11 @@ Units that walk around obstacles use `Pragma.Lockstep.Navigation` (assembly refe
   `LockstepPathfinder` (scratch memory, one per thread) for paths outside agents.
 - **Standing in an obstacle.** An idle or arrived agent whose cell becomes blocked (a building placed on it, a unit
   spawned or stopped inside one) walks to the nearest walkable cell by itself.
-- Agents do not avoid each other. See `references/simulation-api.md` and the README section *Navigation*.
+- **Keeping apart.** Agents with a `radius` are pushed apart where they overlap (`LockstepNavSeparationSystem`, after
+  they walked; a walking agent gives way to a standing one), never onto a blocked cell; paths do not go around other
+  agents, and a standing agent may be shouldered a little off its spot. Spread the destinations of a group
+  (formation places) rather than sending it to one point. See `references/simulation-api.md` and the README section
+  *Navigation*.
 
 ## Stats
 
