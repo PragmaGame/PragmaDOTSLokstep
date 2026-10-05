@@ -15,13 +15,14 @@ The package is unreleased: backward compatibility is not required yet, prefer cl
 
 | Path | Contents |
 |------|----------|
-| `Assets/PragmaDOTSLockstep/Runtime/Mathematics` | `Pragma.Lockstep.Mathematics`: `FixedPoint`, `FixedVector2`, `FixedVector3`, `FixedQuaternion`, `FixedMath`, `FixedRandom`. No Entities dependency |
+| `Assets/PragmaDOTSLockstep/Runtime/Mathematics` | `Pragma.Lockstep.Mathematics`: `FixedPoint`, `FixedVector2`, `FixedVector3`, `FixedQuaternion`, `FixedMath`, `FixedRandom`, `FixedGrid`. No Entities dependency |
 | `Assets/PragmaDOTSLockstep/Runtime/Core` | Transport-agnostic protocol: `LockstepServer`, `LockstepClient`, settings, framing, frame history, replays, loopback network |
 | `Assets/PragmaDOTSLockstep/Runtime/Simulation` | `LockstepSimulation` (the isolated world), the system group, command buffer systems, frame application, checksums, entity ids |
 | `Assets/PragmaDOTSLockstep/Runtime/Simulation/Components` | Simulation components and singletons |
 | `Assets/PragmaDOTSLockstep/Runtime/Transforms` | `LockstepTransform`, history and interpolation |
 | `Assets/PragmaDOTSLockstep/Runtime/Client` | Local input, `LockstepWorlds`, offline mode, prefab registry copy, `LockstepViewSystem` |
 | `Assets/PragmaDOTSLockstep/Runtime/Navigation` | `Pragma.Lockstep.Navigation`: grid, obstacles, agents, `LockstepPathfinder` (A* and string pulling in integer math) and the navigation systems |
+| `Assets/PragmaDOTSLockstep/Runtime/Vision` | `Pragma.Lockstep.Vision`: the vision grid (one plane per player slot), vision sources, `LockstepVisionSystem` and the `LockstepVision` queries |
 | `Assets/PragmaDOTSLockstep/Runtime/Stats` | `Pragma.Lockstep.Stats`: attributes and resources (`LockstepStat`), modifiers, one-tick changes and grants (`LockstepStatModifier`, `LockstepStatChange`, `LockstepStatGrant`, `LockstepStatGrantor`, `LockstepStatTarget`), `LockstepStatSystem`, `LockstepStats` helpers |
 | `Assets/PragmaDOTSLockstep/Runtime/Views` | `Pragma.Lockstep.Views`: GameObject views ported from ECV (DawnOfWar): `EntityView`, view parts, `EntityViewKey`, `EntityViewManagerSystem`, update systems, catalogs, `IEntityViewPool` |
 | `Assets/PragmaDOTSLockstep/Runtime/Netcode` | `Pragma.Lockstep.Netcode`: the RPC and the Netcode server and client systems |
@@ -125,7 +126,8 @@ to a drive letter with `subst`.
 ## Tests
 
 - `Assets/Tests/Editor` is the EditMode suite: math accuracy and Burst equality, golden results, serialization,
-  checksums, simulation rules, navigation (pathfinder, Burst equality, obstacles, agents, keeping agents apart, ground heights and steep cells, a session over a hill), stats (formula,
+  checksums, simulation rules, navigation (pathfinder, Burst equality, obstacles, agents, keeping agents apart, ground heights and steep cells, a session over a hill), vision (stamping, bodies seen by their edge, revealing, one
+  plane per slot, a session), stats (formula,
   non-stacking modifiers, sources, timed modifiers, resources and caps, changes, grants, enum ids in Burst, change
   versions, a session with a late joiner), sessions
   (latency, jitter, late join, disconnects, desync attribution, replays, commands with large data), presentation,

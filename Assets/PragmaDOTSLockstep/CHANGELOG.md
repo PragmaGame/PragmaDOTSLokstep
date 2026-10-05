@@ -8,6 +8,15 @@ and this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Vision (`Pragma.Lockstep.Vision`): what every player slot sees, as simulation state. `LockstepVisionGrid` (a grid of
+  cells on the XZ plane, one plane of `LockstepVisionCell`s per slot of the session, `isRevealed` to show everything)
+  is filled again on every tick by `LockstepVisionSystem`, last in the tick, from the `LockstepVisionSource`s (a radius
+  and the slot it sees for) at their transforms; a cell is visible when a circle of sight reaches into it.
+  `LockstepVision` answers `IsVisible` (a point, or a body seen by its edge), `IsCellVisible` and `GetPlane` (to draw a
+  slot's fog of war). `LockstepVisionGridAuthoring` and `LockstepVisionSourceAuthoring` bake them.
+- `FixedGrid` (`Pragma.Lockstep.Mathematics`): the cell math of a rectangle of square cells on the XZ plane (which cell
+  holds a position, cell corners and centres, indices), shared by the navigation and the vision grids;
+  `LockstepNavGrid.Layout` and `LockstepVisionGrid.Layout` return it.
 - Ground heights for navigation: `LockstepNavHeight`, a buffer of world Y at every cell corner of the grid, and
   `LockstepNavGrid.maxSlope`, the steepest walkable slope. Agents walk on the ground (`LockstepNavMoveSystem`,
   `LockstepNavSeparationSystem`), cells steeper than the limit are blocked for good, and `LockstepNavigation` answers

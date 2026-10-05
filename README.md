@@ -19,6 +19,8 @@ server never simulates, and the bandwidth depends on the number of players, not 
 - Netcode for Entities integration (host, dedicated server, thin clients) and a transport-agnostic core.
 - Deterministic navigation: a walkability grid with ground heights baked from a terrain (steep slopes blocked), obstacles,
   A* with string pulling in integer math, agents that walk on the ground and re-plan when obstacles change.
+- Vision: what every player slot sees, stamped on a grid from vision sources on every tick, the same on every client,
+  for the fog of war and for rules that need a visible target.
 - Stats: attributes with flat, additive and multiplicative modifiers (timed, non-stacking, removed with their source),
   resources such as health with one-tick damage and healing and an attribute as their cap, bonuses a player or squad
   grants to all of its units; recalculated only where something changed.
@@ -42,7 +44,7 @@ Only `Assets/PragmaDOTSLockstep` ships; everything else is the development proje
 |---|---|
 | `Assets/PragmaDOTSLockstep` | The package: runtime, Netcode integration, authoring, editor tools, Claude Code skills (`Skills~`) |
 | `Assets/Examples` | *Lockstep Arena*, a playable sample: offline, host and join ([README](Assets/Examples/README.md)) |
-| `Assets/Tests/Editor` | EditMode tests: math, serialization, checksums, simulation, navigation, stats, sessions, presentation, GameObject views, Netcode integration |
+| `Assets/Tests/Editor` | EditMode tests: math, serialization, checksums, simulation, navigation, vision, stats, sessions, presentation, GameObject views, Netcode integration |
 | `Assets/Tests/Runtime` | MonoBehaviours the tests put on GameObjects (Unity cannot add components from Editor assemblies) |
 | [`documentation.md`](documentation.md) | Design notes: architecture, decisions, what was taken from ME.BECS, Photon Quantum and ECV, and why |
 | [`mebecs_research.md`](mebecs_research.md) | How ME.BECS implements determinism and networking |

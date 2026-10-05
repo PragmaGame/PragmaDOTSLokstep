@@ -1,6 +1,6 @@
 ---
 name: pragma-lockstep-gameplay
-description: Write deterministic gameplay for Pragma DOTS Lockstep (com.pragma.dotslockstep, Pragma.Lockstep) - simulation systems in LockstepSimulationSystemGroup, input structs and commands, player join/leave, spawning, LockstepEntityId references, grid navigation (LockstepNavGrid, LockstepNavAgent, LockstepPathfinder), stats (attributes with timed or non-stacking modifiers, resources such as health with damage, healing and caps, research and squad bonuses granted to groups: LockstepStat, LockstepStatModifier, LockstepStatChange, LockstepStatGrant), fixed-point math (FixedPoint, FixedVector3, FixedMath, FixedRandom) and presenting it with interpolation and GameObject views (EntityView, EntityComponentView, EntityBufferView, update systems, catalogs, pools). Use it whenever you add or change anything that runs inside a lockstep simulation world or reads it for rendering - units, movement, combat, abilities, economy, AI, timers, randomness, input, views, UI - even if the user never says "deterministic" or "lockstep".
+description: Write deterministic gameplay for Pragma DOTS Lockstep (com.pragma.dotslockstep, Pragma.Lockstep) - simulation systems in LockstepSimulationSystemGroup, input structs and commands, player join/leave, spawning, LockstepEntityId references, grid navigation (LockstepNavGrid, LockstepNavAgent, LockstepPathfinder), vision and fog of war (LockstepVisionGrid, LockstepVisionSource, LockstepVision), stats (attributes with timed or non-stacking modifiers, resources such as health with damage, healing and caps, research and squad bonuses granted to groups: LockstepStat, LockstepStatModifier, LockstepStatChange, LockstepStatGrant), fixed-point math (FixedPoint, FixedVector3, FixedMath, FixedRandom) and presenting it with interpolation and GameObject views (EntityView, EntityComponentView, EntityBufferView, update systems, catalogs, pools). Use it whenever you add or change anything that runs inside a lockstep simulation world or reads it for rendering - units, movement, combat, abilities, economy, AI, timers, randomness, input, views, UI - even if the user never says "deterministic" or "lockstep".
 ---
 
 # Gameplay with Pragma DOTS Lockstep
@@ -292,6 +292,24 @@ Units that walk around obstacles use `Pragma.Lockstep.Navigation` (assembly refe
   agents, and a standing agent may be shouldered a little off its spot. Spread the destinations of a group
   (formation places) rather than sending it to one point. See `references/simulation-api.md` and the README section
   *Navigation*.
+
+## Vision
+
+What each player slot sees is simulation state (`Pragma.Lockstep.Vision`, assembly reference `Pragma.Lockstep.Vision`),
+so rules may depend on it and every client agrees:
+
+- **Grid.** One `LockstepVisionGrid` per simulation world, baked with `LockstepVisionGridAuthoring` (size, cell size) into
+  the map subscene. `LockstepVisionSystem` runs last in the tick and fills one plane of `LockstepVisionCell`s per slot
+  of the session from scratch. Without a grid nothing is hidden.
+- **Sources.** `LockstepVisionSourceAuthoring` on whatever sees (units, buildings); bake slot -1 and set `slot` to the
+  owner's slot where the entity gets it, and copy a sight stat into `radius` with a change-filtered job, as with speed.
+- **Queries.** `LockstepVision.IsVisible(grid, cells, slot, position.Xz, radius)` (a body is seen by its edge),
+  `IsCellVisible`, `GetPlane` for the presentation. Whatever lies within a source's radius lies in a visible cell.
+  Validate commands against vision ("attack only what you see"): the planes are what the player saw.
+- **Revealing.** `LockstepVisionGrid.isRevealed` shows everything to everyone (a match option from the start data, a
+  debug switch).
+- **Presentation.** Draw the fog from the local slot's plane and hide the views of what it does not see; never write the
+  hiding back into the simulation.
 
 ## Stats
 

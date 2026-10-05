@@ -10,10 +10,11 @@ namespace Pragma.Lockstep.Navigation
     /// <see cref="LockstepNavHeight"/> buffer.
     /// </summary>
     /// <remarks>
-    /// Cell (x, y) starts at world X <c>origin.x + x * cellSize</c> and world Z <c>origin.y + y * cellSize</c> and is one
-    /// cell size wide. Positions map to cells with integer math on raw fixed-point values, so every client puts a position
-    /// into the same cell. Bake the grid with <c>LockstepNavGridAuthoring</c> into the subscene of the map, or create the
-    /// entity in code before tick 0; <see cref="LockstepNavObstacleSystem"/> sizes the cell buffer.
+    /// The cells are laid out as a <see cref="FixedGrid"/> (<see cref="Layout"/>): cell (x, y) starts at world X
+    /// <c>origin.x + x * cellSize</c> and world Z <c>origin.y + y * cellSize</c>, and positions map to cells with integer
+    /// math, so every client puts a position into the same cell. Bake the grid with <c>LockstepNavGridAuthoring</c> into
+    /// the subscene of the map, or create the entity in code before tick 0; <see cref="LockstepNavObstacleSystem"/> sizes
+    /// the cell buffer.
     /// </remarks>
     public struct LockstepNavGrid : IComponentData
     {
@@ -38,54 +39,35 @@ namespace Pragma.Lockstep.Navigation
         /// <summary>Changes whenever a cell does. Agents check their paths again when it changes.</summary>
         public uint version;
 
-        public int CellCount => width * height;
+        /// <summary>The cells of the grid without its navigation data: the cell math lives there.</summary>
+        public FixedGrid Layout => new FixedGrid(origin, cellSize, width, height);
+
+        public int CellCount => Layout.CellCount;
 
         /// <summary>Number of cell corners: the length of the <see cref="LockstepNavHeight"/> buffer.</summary>
         public int CornerCount => (width + 1) * (height + 1);
 
-        public bool IsValid => width > 0 && height > 0 && cellSize.rawValue > 0;
+        public bool IsValid => Layout.IsValid;
 
-        public bool Contains(int2 cell) => cell.x >= 0 && cell.y >= 0 && cell.x < width && cell.y < height;
+        public bool Contains(int2 cell) => Layout.Contains(cell);
 
-        public int GetIndex(int2 cell) => cell.y * width + cell.x;
+        public int GetIndex(int2 cell) => Layout.GetIndex(cell);
 
-        public int2 GetCell(int index) => new int2(index % width, index / width);
+        public int2 GetCell(int index) => Layout.GetCell(index);
 
         /// <summary>Index of corner (x, y) in the <see cref="LockstepNavHeight"/> buffer; corner (x, y) is where cell (x, y) starts.</summary>
         public int GetCornerIndex(int2 corner) => corner.y * (width + 1) + corner.x;
 
         /// <summary>The cell that holds a world position (X and Z); it may lie outside the grid.</summary>
-        public int2 WorldToCell(FixedVector2 position)
-        {
-            return new int2(FloorDivide(position.x.rawValue - origin.x.rawValue), FloorDivide(position.y.rawValue - origin.y.rawValue));
-        }
+        public int2 WorldToCell(FixedVector2 position) => Layout.WorldToCell(position);
 
         /// <summary>The cell under a world position; Y is ignored.</summary>
         public int2 WorldToCell(FixedVector3 position) => WorldToCell(position.Xz);
 
         /// <summary>World X and Z of the centre of a cell.</summary>
-        public FixedVector2 GetCellCenter(int2 cell)
-        {
-            var half = cellSize.rawValue / 2;
-            return new FixedVector2(
-                FixedPoint.FromRaw(origin.x.rawValue + cell.x * cellSize.rawValue + half),
-                FixedPoint.FromRaw(origin.y.rawValue + cell.y * cellSize.rawValue + half));
-        }
+        public FixedVector2 GetCellCenter(int2 cell) => Layout.GetCellCenter(cell);
 
         /// <summary>The nearest cell inside the grid.</summary>
-        public int2 ClampToGrid(int2 cell) => math.clamp(cell, int2.zero, new int2(width - 1, height - 1));
-
-        private int FloorDivide(long offset)
-        {
-            var size = cellSize.rawValue;
-            var quotient = offset / size;
-            if (offset % size != 0 && offset < 0)
-            {
-                quotient--;
-            }
-            // Far away positions only need to stay outside the grid.
-            const long limit = 1L << 30;
-            return (int)(quotient < -limit ? -limit : quotient > limit ? limit : quotient);
-        }
+        public int2 ClampToGrid(int2 cell) => Layout.ClampToGrid(cell);
     }
 }

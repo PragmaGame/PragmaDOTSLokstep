@@ -13,6 +13,7 @@ camelCase; settings and options are PascalCase properties.
 - Entity ids
 - Prefab registry
 - Navigation
+- Vision
 - Stats
 - Bytes helpers
 - Presentation-side access
@@ -144,7 +145,7 @@ Namespace and assembly `Pragma.Lockstep.Navigation`.
 
 | Type | Members |
 |---|---|
-| `LockstepNavGrid` | Singleton. `FixedVector2 origin` (corner of cell 0, 0 on X and Z), `FixedPoint cellSize`, `int width`, `int height`, `FixedPoint agentRadius`, `FixedPoint maxSlope` (rise over run; steeper cells are blocked, 0 none), `uint version` (changes with any cell); `CellCount`, `CornerCount`, `IsValid`, `Contains`, `GetIndex`, `GetCornerIndex`, `GetCell`, `WorldToCell`, `GetCellCenter`, `ClampToGrid` |
+| `LockstepNavGrid` | Singleton. `FixedVector2 origin` (corner of cell 0, 0 on X and Z), `FixedPoint cellSize`, `int width`, `int height`, `FixedPoint agentRadius`, `FixedPoint maxSlope` (rise over run; steeper cells are blocked, 0 none), `uint version` (changes with any cell); `Layout` (the `FixedGrid` of its cells), `CellCount`, `CornerCount`, `IsValid`, `Contains`, `GetIndex`, `GetCornerIndex`, `GetCell`, `WorldToCell`, `GetCellCenter`, `ClampToGrid` |
 | `LockstepNavCell` | Buffer on the grid entity, row by row along X: `ushort blockers`, `IsWalkable`. Sized by `LockstepNavObstacleSystem`, which starts every steep cell with one permanent blocker |
 | `LockstepNavHeight` | Optional buffer on the grid entity: `FixedPoint value`, world Y of the ground at each cell corner, `CornerCount` of them row by row along X. Static: read when the cells are built. Agents walk on it |
 | `LockstepNavObstacle` | `FixedVector2 center`, `FixedVector2 size`: a rectangle in the space of the entity's `LockstepTransform` (yaw, uniform scale), world space without one |
@@ -158,6 +159,25 @@ Namespace and assembly `Pragma.Lockstep.Navigation`.
 
 Read the cells with `SystemAPI.GetSingletonBuffer<LockstepNavCell>(true).AsNativeArray()` and the grid with
 `SystemAPI.GetSingleton<LockstepNavGrid>()`.
+
+`FixedGrid` (`Pragma.Lockstep.Mathematics`) is the cell math both grids share: `origin`, `cellSize`, `width`, `height`;
+`CellCount`, `IsValid`, `Contains`, `GetIndex`, `GetCell`, `WorldToCell(xz)` (integer math on raw values, may lie
+outside), `GetCellMin`, `GetCellCenter`, `ClampToGrid`.
+
+## Vision
+
+Namespace and assembly `Pragma.Lockstep.Vision`.
+
+| Type | Members |
+|---|---|
+| `LockstepVisionGrid` | Singleton. `origin`, `cellSize`, `width`, `height` (a `FixedGrid`, `Layout`), `int slotCount` (planes: the session's `maxPlayers`, set by the system), `bool isRevealed` (every query answers true: fog off); `CellCount` (of one plane), `IsValid`, `Contains`, `WorldToCell` |
+| `LockstepVisionCell` | Buffer on the grid entity, plane by plane in slot order, each row by row along X: `bool isVisible`. Sized, cleared and stamped on every tick |
+| `LockstepVisionSource` | `FixedPoint radius` (sight on XZ, up to 30 000; negative sees nothing), `int slot` (sees for it; outside the session's slots, -1 included, for nobody). Needs `LockstepTransform`. Gameplay keeps both current (owner, a sight stat) |
+| `LockstepVisionSystem` | `OrderLast` in `LockstepSimulationSystemGroup`, before `LockstepEndSimulationEntityCommandBufferSystem`: completes the tick's jobs, sizes the buffer (`slotCount` planes), clears it and stamps every source. The planes show the state the tick ended with |
+| `LockstepVision` | `HasCells(grid, cells)`, `GetPlane(grid, cells, slot)` (one slot's cells, to draw its fog; default for a slot without a plane), `IsVisible(grid, cells, slot, xz)`, `IsVisible(grid, cells, slot, xz, radius)` (a body seen by its edge), `IsCellVisible(grid, cells, slot, cell)`, `Stamp(grid, cells, slot, xz, radius)`. A cell is visible when a circle of sight reaches into it; nothing outside the grid is visible unless revealed |
+
+Read them with `SystemAPI.GetSingletonEntity<LockstepVisionGrid>()` and the buffer of that entity. A command checked
+against vision ("attack only what you see") reads the planes the previous tick left, which is what the player saw.
 
 ## Stats
 
@@ -218,6 +238,10 @@ Namespace `Pragma.Lockstep.Authoring`:
 - `LockstepNavObstacleAuthoring` - a box whose X and Z block the grid; moves with a `LockstepTransformAuthoring` next to
   it, otherwise its pose is baked (static map content, add `LockstepSceneEntityAuthoring`).
 - `LockstepNavAgentAuthoring` - `LockstepNavAgent` and its waypoint buffer; needs `LockstepTransformAuthoring`.
+- `LockstepVisionGridAuthoring` - the vision grid of a map (size centred on the GameObject, cell size: how fine the fog
+  edge is); needs and adds `LockstepSceneEntityAuthoring`.
+- `LockstepVisionSourceAuthoring` - `LockstepVisionSource` with a radius and slot -1 (set it to the owner's slot in
+  gameplay); needs `LockstepTransformAuthoring`.
 
 For your own data, write regular bakers and convert floats to `FixedPoint` in the baker (`(FixedPoint)authoring.speed`): baking
 happens once, so every client loads the same raw values.

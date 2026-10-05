@@ -20,6 +20,7 @@ simulated entities.
 - [Determinism rules](#determinism-rules)
 - [Fixed-point math](#fixed-point-math)
 - [Navigation](#navigation)
+- [Vision](#vision)
 - [Stats](#stats)
 - [Sessions](#sessions)
 - [Presentation](#presentation)
@@ -72,6 +73,8 @@ It is a poor fit for:
 - **Navigation.** A walkability grid with ground heights baked from a terrain (steep slopes blocked), obstacles that
   block it while their entity exists, A* with string pulling in integer math and agents that walk the paths on the
   ground in `FixedPoint`, planning again when obstacles change.
+- **Vision.** What every player slot sees, stamped on a grid from vision sources on every tick: state of the simulation,
+  the same on every client, for the fog of war and for rules that need a visible target.
 - **Stats.** Attributes with flat, additive and multiplicative modifiers (timed or lasting until their source removes
   them, stacking or not) and resources capped by an attribute, changed by one-tick changes such as damage; modifiers a
   player or a squad grants to all of its units, the later ones included. In `FixedPoint`, recalculated only where
@@ -119,9 +122,10 @@ Reference the assemblies you use from your assembly definitions:
 | `Pragma.Lockstep` | Protocol, simulation world, components, checksums, replays, offline mode, presentation helpers | simulation and presentation code |
 | `Pragma.Lockstep.Navigation` | The walkability grid, obstacles, agents, `LockstepPathfinder` and the navigation systems | simulation code |
 | `Pragma.Lockstep.Stats` | Attributes, resources, modifiers, changes and grants, `LockstepStatSystem` and the `LockstepStats` helpers | simulation code, and presentation code that shows stats |
+| `Pragma.Lockstep.Vision` | The vision grid, vision sources, `LockstepVisionSystem` and the `LockstepVision` queries | simulation code, and presentation code that draws the fog of war |
 | `Pragma.Lockstep.Views` | GameObject views: `EntityView`, view parts, `EntityViewKey`, the view manager, catalogs, the pool abstraction | presentation code, and simulation code that sets an `EntityViewKey` |
 | `Pragma.Lockstep.Netcode` | Netcode for Entities RPC and the server and client systems | bootstrap code |
-| `Pragma.Lockstep.Authoring` | Bakers for transforms, the prefab registry, scene entities, entity ids, view catalogs and view keys | authoring code, if any |
+| `Pragma.Lockstep.Authoring` | Bakers for transforms, the prefab registry, scene entities, entity ids, view catalogs and view keys, navigation and vision | authoring code, if any |
 
 ## How it works
 
@@ -821,6 +825,72 @@ Keeping apart sorts the agents with a radius into a spatial hash once per tick a
 nine hash cells around it.
 Pick the cell size from the narrowest gap units must pass: about the agent radius is a good start.
 
+## Vision
+
+`Pragma.Lockstep.Vision` keeps what every player slot sees inside the simulation: a grid of cells on the XZ plane, one
+plane per slot, filled again on every tick from the entities that see. Vision is simulation state like positions: every
+client computes the same planes, so rules may depend on it (orders only on targets the player sees, units that hide
+until detected, the AI) and the presentation draws the fog of war from it.
+
+| Type | What it is |
+|---|---|
+| `LockstepVisionGrid` | Singleton: origin, cell size, width, height (laid out as a `FixedGrid`, like the navigation grid), the number of planes (`slotCount`, the session's `maxPlayers`) and `isRevealed`, which shows everything to every slot. The cells are the `LockstepVisionCell` buffer of the same entity: plane by plane in slot order, `isVisible` per cell |
+| `LockstepVisionSource` | An entity that lets a slot see: the radius of its sight on the XZ plane and the slot it sees for (-1, or any slot outside the session, sees for nobody), around its `LockstepTransform` |
+| `LockstepVisionSystem` | Last in `LockstepSimulationSystemGroup`, before the end-of-tick command buffer: sizes the buffer, clears it and stamps every source |
+| `LockstepVision` | The queries: `IsVisible` (a point, or a body of some radius, seen by its edge), `IsCellVisible`, `GetPlane` (the cells of one slot, to draw its fog), `HasCells`, `Stamp` |
+
+### Setting it up
+
+1. Add a `LockstepVisionGridAuthoring` to the subscene of the map (it brings a `LockstepSceneEntityAuthoring`): the size
+   in world units, centred on the GameObject, usually the area of the navigation grid, and the cell size, which is how
+   fine the edge of the fog is (a few world units).
+2. Give whatever sees a `LockstepVisionSourceAuthoring` (next to a `LockstepTransformAuthoring`) with its radius. The
+   baked slot is -1: set `slot` where the entity gets its owner, and keep `radius` current from gameplay if sight can
+   change (research, abilities):
+
+```csharp
+[UpdateInGroup(typeof(LockstepSimulationSystemGroup))]
+public partial struct VisionOwnerSystem : ISystem
+{
+    public void OnUpdate(ref SystemState state)
+    {
+        foreach (var (source, owner) in SystemAPI.Query<RefRW<LockstepVisionSource>, RefRO<Owner>>().WithChangeFilter<Owner>())
+        {
+            source.ValueRW.slot = owner.ValueRO.slot;
+        }
+    }
+}
+```
+
+3. Ask what a slot sees with the grid and its cells:
+
+```csharp
+var gridEntity = SystemAPI.GetSingletonEntity<LockstepVisionGrid>();
+var grid = SystemAPI.GetComponent<LockstepVisionGrid>(gridEntity);
+var cells = SystemAPI.GetBuffer<LockstepVisionCell>(gridEntity, true).AsNativeArray();
+var canAttack = LockstepVision.IsVisible(grid, cells, slot, target.position.Xz, targetRadius);
+```
+
+### Behaviour
+
+- **Cells.** A cell is visible to a slot when the circle of one of its sources reaches into the cell, not only over its
+  centre: whatever lies within a source's radius lies in a visible cell, so a unit that fights what it sees never
+  fights something its player cannot see. A body is seen as soon as its edge is (`IsVisible` with a radius). Nothing
+  outside the grid is visible.
+- **Timing.** The planes show the state the tick ended with: the presentation draws them after the tick, and the
+  commands of the next tick, which the players issued looking at them, are checked against them.
+- **Revealing.** `isRevealed` makes every query answer true for every slot (a match option, a debug switch, the end of
+  the match); the planes are still filled, so turning it off again shows the fog at once.
+- **Allies.** Each source sees for one slot; players that share vision are asked together (visible to any of their
+  slots).
+- **Determinism.** Distances are compared on raw fixed-point values. Stamping only marks cells, so the order sources are
+  visited in does not matter. The planes are hashed with the rest of the state.
+
+### Cost
+
+Each tick clears `slotCount` planes and stamps every source over the square around its circle: about
+(2 × radius / cell size)² cells per source. A 256 × 256 map with 2-unit cells and two slots holds 32 768 cells.
+
 ## Stats
 
 `Pragma.Lockstep.Stats` keeps the numbers of entities in `FixedPoint`: *attributes* that upgrades, research, abilities
@@ -1178,7 +1248,9 @@ simulation world, not even a cleanup component, so views cannot cause desyncs.
 
 `Entity` values work as keys only in this process and session. To send a command about the unit under the cursor,
 read its id with `view.TryGetData<LockstepEntityId>(out var id)`. State that is local to one player (selection, hover,
-fog of war visibility) belongs to the presentation: keep it on the views, never in the simulation.
+whether a view is hidden by the fog of war) belongs to the presentation: keep it on the views, never in the simulation.
+What a player sees is simulation state (see [Vision](#vision)); hiding the views of what it does not see is the
+presentation's job.
 
 A pooled instance keeps whatever its parts changed on it: restore that in `BindBreak` (or `Bind`).
 `EntityComponentViewUnmanaged<T>` forgets its cached value on `Bind`, and unbinding turns `IsAutoUpdateEnabled` back on.
@@ -1554,10 +1626,11 @@ that form and relays the bytes without decoding them.
 | `Runtime/Client` | Local input, `LockstepWorlds`, offline mode, prefab registry copy, `LockstepViewSystem` |
 | `Runtime/Navigation` | `Pragma.Lockstep.Navigation`: the grid, obstacles, agents, `LockstepPathfinder`, the navigation systems |
 | `Runtime/Stats` | `Pragma.Lockstep.Stats`: attributes and resources, modifiers, changes and grants, `LockstepStatSystem`, `LockstepStats` |
+| `Runtime/Vision` | `Pragma.Lockstep.Vision`: the vision grid, sources, `LockstepVisionSystem`, `LockstepVision` |
 | `Runtime/Views` | `Pragma.Lockstep.Views`: GameObject views (`EntityView`, view parts, `EntityViewManagerSystem`, update systems, catalogs, the pool) |
 | `Runtime/Netcode` | `Pragma.Lockstep.Netcode`: the RPC, server and client systems, `LockstepNetcode` |
 | `Runtime/Netcode/Components` | `LockstepServerConfig`, `LockstepClientConfig`, `LockstepServerStatus`, start and end requests |
-| `Runtime/Authoring` | `Pragma.Lockstep.Authoring`: bakers (transforms, prefab registry, scene entities, entity ids, view catalogs and keys, navigation grid, obstacles and agents) |
+| `Runtime/Authoring` | `Pragma.Lockstep.Authoring`: bakers (transforms, prefab registry, scene entities, entity ids, view catalogs and keys, navigation grid, obstacles and agents, vision grid and sources) |
 | `Editor` | `Pragma.Lockstep.Editor`: fixed-point drawers, the debug window |
 | `Skills~` | Claude Code skills (Unity skips folders whose name ends with `~`) |
 
@@ -1568,7 +1641,7 @@ how to work with it:
 
 | Skill | Use it for |
 |---|---|
-| `pragma-lockstep-gameplay` | Writing simulation code: systems, input, commands, players, `FixedPoint` math, spawning, navigation, stats; presentation and GameObject views |
+| `pragma-lockstep-gameplay` | Writing simulation code: systems, input, commands, players, `FixedPoint` math, spawning, navigation, vision, stats; presentation and GameObject views |
 | `pragma-lockstep-sessions` | Offline, host, join, dedicated servers, settings, match flow, custom transports, replays |
 | `pragma-lockstep-desync` | Finding and preventing desyncs, determinism tests |
 
@@ -1620,8 +1693,9 @@ Copy-Item -Recurse -Force (Resolve-Path "Library/PackageCache/com.pragma.dotsloc
 - **Late join from a snapshot.** Joining re-simulates the match from tick 0, which grows with the match length.
 - **Deterministic physics.** Use `FixedPoint` math for collisions (the sample does). Unity Physics is not deterministic
   across platforms.
-- **Local avoidance and richer navigation.** Agents follow their own paths and may overlap. One grid per world with one
-  agent radius, flat (no heights or cell costs), and no flow fields for large groups.
+- **Local avoidance and richer navigation.** Agents are pushed apart but do not plan around each other. One grid per
+  world with one agent radius, no cell costs, and no flow fields for large groups.
+- **Line of sight.** Vision is a radius on the XZ plane: neither the ground nor obstacles block it.
 
 ## License
 

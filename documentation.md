@@ -296,7 +296,17 @@ These came up while building on Entities; neither reference package deals with t
     8-byte boundaries in the buffer, with zeroed padding, so any element type reads aligned and the checksum sees the
     same bytes everywhere.
 
-13. **Stats as buffers with change versions.** Upgrades, research, abilities and auras all change numbers of units,
+13. **Vision in the simulation.** What a player sees decides gameplay in a strategy game: an order to attack needs a
+    target the player can see, hidden units are revealed by detectors, the AI must not cheat. Kept only in the
+    presentation, vision would make such rules local to one machine, so it is simulation state: a grid with one plane
+    of cells per player slot, filled again on every tick from the vision sources. Recomputing from scratch keeps it
+    stateless and order-free (stamping only marks cells), and it costs a few thousand cell checks per source. A cell is
+    visible when a circle of sight reaches into it, not only over its centre, so everything within a source's radius
+    lies in a visible cell and a unit never fights what its player cannot see. Sight is a radius on the XZ plane:
+    blocking it by ground or obstacles (line of sight per cell) is left to games that need it. The fog of war itself,
+    the drawing and the hiding of views, stays in the presentation, which reads the planes.
+
+14. **Stats as buffers with change versions.** Upgrades, research, abilities and auras all change numbers of units,
     and patching component fields by hand loses track of who changed what and leaves no way to end an effect. Each
     entity keeps its stats and their modifiers in buffers; the game names its stats with its own ids (an enum, which
     the helpers convert), so the package knows no stat list and an entity carries only the stats it has. Modifiers are
