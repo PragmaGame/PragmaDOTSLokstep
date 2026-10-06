@@ -18,6 +18,7 @@ namespace Pragma.Lockstep.Tests
             typeof(LockstepNavSystemGroup),
             typeof(LockstepNavObstacleSystem),
             typeof(LockstepNavPathSystem),
+            typeof(LockstepNavAvoidanceSystem),
             typeof(LockstepNavMoveSystem),
             typeof(LockstepNavSeparationSystem),
         };
@@ -635,11 +636,12 @@ namespace Pragma.Lockstep.Tests
             using (var simulation = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
             {
                 var entityManager = simulation.World.EntityManager;
-                var grid = CreateGrid(entityManager);
+                // Bodies as large as the agent radius of the grid: the cells next to the wall fit them.
+                var grid = CreateGrid(entityManager, FixedPoint.Half);
                 CreateWall(entityManager, FixedVector2.Zero, new FixedVector2(1, 12));
                 // The right agent stands at the wall: its push goes into it, so only the left one gives way.
-                var left = CreateAgent(entityManager, Point(FixedPoint.FromFraction(-3, 4), 0), 4, default, FixedPoint.Half);
-                var right = CreateAgent(entityManager, Point(FixedPoint.FromFraction(-11, 20), 0), 4, default, FixedPoint.Half);
+                var left = CreateAgent(entityManager, Point(FixedPoint.FromFraction(-5, 4), 0), 4, default, FixedPoint.Half);
+                var right = CreateAgent(entityManager, Point(FixedPoint.FromFraction(-21, 20), 0), 4, default, FixedPoint.Half);
 
                 for (var tick = 1; tick <= 40; tick++)
                 {
@@ -648,7 +650,7 @@ namespace Pragma.Lockstep.Tests
                     Assert.IsTrue(IsWalkable(entityManager, grid, Position(entityManager, right)), $"tick {tick}: right agent on a blocked cell");
                 }
                 // Pushes small enough to keep it on its cell bring it up to the wall, never away from it.
-                Assert.GreaterOrEqual((double)Position(entityManager, right).x, -0.55, "the agent at the wall does not give way");
+                Assert.GreaterOrEqual((double)Position(entityManager, right).x, -1.05, "the agent at the wall does not give way");
                 Assert.Greater((double)FixedMath.Distance(Position(entityManager, left), Position(entityManager, right)), 0.95);
             }
         }
@@ -757,7 +759,548 @@ namespace Pragma.Lockstep.Tests
         }
 
         [Test]
+        public void Avoidance_AgentsWalkingIntoEachOther_PassWithoutTouching()
+        {
+            var avoiding = WalkHeadOn(true);
+            var plain = WalkHeadOn(false);
+            Assert.Greater(avoiding, 0.95, "with avoidance the bodies do not touch");
+            Assert.Less(plain, 0.9, "without it they walk into each other");
+        }
+
+        // Two agents of radius 1/2 walk at each other along X, each to where the other started. Returns the least
+        // distance between them; with avoidance both must arrive (without it they push each other along their line and
+        // get stuck).
+        private static double WalkHeadOn(bool isAvoiding)
+        {
+            using (var simulation = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
+            {
+                var entityManager = simulation.World.EntityManager;
+                var grid = CreateGrid(entityManager);
+                if (isAvoiding)
+                {
+                    CreateAvoidance(entityManager);
+                }
+                var left = WithVelocity(entityManager, CreateAgent(entityManager, Point(-6, 0), 4, Point(6, 0), FixedPoint.Half));
+                var right = WithVelocity(entityManager, CreateAgent(entityManager, Point(6, 0), 4, Point(-6, 0), FixedPoint.Half));
+
+                var least = double.MaxValue;
+                for (var tick = 1; tick <= 200 && !(HasArrived(entityManager, left) && HasArrived(entityManager, right)); tick++)
+                {
+                    TestUtility.Step(simulation);
+                    Assert.IsTrue(IsWalkable(entityManager, grid, Position(entityManager, left)) && IsWalkable(entityManager, grid, Position(entityManager, right)));
+                    least = Math.Min(least, (double)FixedMath.Distance(Position(entityManager, left), Position(entityManager, right)));
+                }
+                if (isAvoiding)
+                {
+                    Assert.IsTrue(HasArrived(entityManager, left) && HasArrived(entityManager, right), "both agents arrived");
+                    Assert.AreEqual(Point(6, 0), Position(entityManager, left));
+                    Assert.AreEqual(Point(-6, 0), Position(entityManager, right));
+                }
+                return least;
+            }
+        }
+
+        [Test]
+        public void Avoidance_WalkerGoesAroundAStandingAgent()
+        {
+            var avoiding = PassStander(true);
+            var plain = PassStander(false);
+            Assert.Less(avoiding, 0.02, "with avoidance the walker goes around the standing agent");
+            Assert.Greater(plain, 0.1, "without it the walker shoulders the standing agent aside");
+        }
+
+        // A walker passes a standing agent a little off its way along X. Returns how far the standing agent was pushed.
+        private static double PassStander(bool isAvoiding)
+        {
+            using (var simulation = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
+            {
+                var entityManager = simulation.World.EntityManager;
+                var grid = CreateGrid(entityManager, FixedPoint.Half);
+                if (isAvoiding)
+                {
+                    CreateAvoidance(entityManager);
+                }
+                var start = Point(0, FixedPoint.FromFraction(1, 5));
+                var stander = WithVelocity(entityManager, CreateAgent(entityManager, start, 4, default, FixedPoint.Half));
+                var walker = WithVelocity(entityManager, CreateAgent(entityManager, Point(-5, 0), 4, Point(5, 0), FixedPoint.Half));
+
+                WalkUntilArrived(simulation, grid, walker, 200);
+                Assert.AreEqual(Point(5, 0), Position(entityManager, walker), "the walker arrived where it was sent");
+                return (double)FixedMath.Distance(Position(entityManager, stander), start);
+            }
+        }
+
+        [Test]
+        public void Avoidance_StandingAgentAtTheDestination_IsShoulderedAside()
+        {
+            using (var simulation = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
+            {
+                var entityManager = simulation.World.EntityManager;
+                var grid = CreateGrid(entityManager);
+                CreateAvoidance(entityManager);
+                var destination = Point(2, 0);
+                var stander = WithVelocity(entityManager, CreateAgent(entityManager, destination, 4, default, FixedPoint.Half));
+                var walker = WithVelocity(entityManager, CreateAgent(entityManager, Point(-2, 0), 4, destination, FixedPoint.Half));
+
+                WalkUntilArrived(simulation, grid, walker, 200);
+                Assert.Greater((double)FixedMath.Distance(Position(entityManager, stander), destination), 0.5, "the standing agent made room");
+            }
+        }
+
+        [Test]
+        public void Avoidance_NeverStepsOntoBlockedCells()
+        {
+            using (var simulation = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
+            {
+                var entityManager = simulation.World.EntityManager;
+                var grid = CreateGrid(entityManager, FixedPoint.FromFraction(1, 4));
+                CreateAvoidance(entityManager);
+                // A corridor two units wide between two walls: the agents meet in it and have little room to turn.
+                CreateWall(entityManager, new FixedVector2(0, FixedPoint.FromFraction(3, 2)), new FixedVector2(10, 1));
+                CreateWall(entityManager, new FixedVector2(0, FixedPoint.FromFraction(-3, 2)), new FixedVector2(10, 1));
+                var agents = new[]
+                {
+                    WithVelocity(entityManager, CreateAgent(entityManager, Point(-7, 0), 4, Point(7, 0), FixedPoint.FromFraction(2, 5))),
+                    WithVelocity(entityManager, CreateAgent(entityManager, Point(7, FixedPoint.FromFraction(1, 4)), 3, Point(-7, 0), FixedPoint.FromFraction(2, 5))),
+                    WithVelocity(entityManager, CreateAgent(entityManager, Point(-8, FixedPoint.FromFraction(1, 2)), 5, Point(7, FixedPoint.FromFraction(1, 2)), FixedPoint.FromFraction(2, 5))),
+                };
+
+                for (var tick = 1; tick <= 400 && !AllArrived(entityManager, agents); tick++)
+                {
+                    TestUtility.Step(simulation);
+                    foreach (var agent in agents)
+                    {
+                        Assert.IsTrue(IsWalkable(entityManager, grid, Position(entityManager, agent)), $"tick {tick}: an agent stands on a blocked cell at {Position(entityManager, agent)}");
+                    }
+                }
+                Assert.IsTrue(AllArrived(entityManager, agents), "the agents made their way through the corridor");
+            }
+        }
+
+        [Test]
+        public void Avoidance_Off_WalksExactlyLikeWithoutAVelocity()
+        {
+            using (var plain = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
+            using (var recorded = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
+            {
+                var plainManager = plain.World.EntityManager;
+                var recordedManager = recorded.World.EntityManager;
+                CreateGrid(plainManager);
+                CreateGrid(recordedManager);
+                CreateWall(plainManager, new FixedVector2(0, 1), new FixedVector2(1, 6));
+                CreateWall(recordedManager, new FixedVector2(0, 1), new FixedVector2(1, 6));
+                var first = CreateAgent(plainManager, Point(-4, 1), 3, Point(4, 2), FixedPoint.Half);
+                var second = WithVelocity(recordedManager, CreateAgent(recordedManager, Point(-4, 1), 3, Point(4, 2), FixedPoint.Half));
+
+                for (var tick = 1; tick <= 120; tick++)
+                {
+                    var before = Position(recordedManager, second);
+                    TestUtility.Step(plain);
+                    TestUtility.Step(recorded);
+                    var after = Position(recordedManager, second);
+                    var deltaTime = recordedManager.CreateEntityQuery(typeof(LockstepTime)).GetSingleton<LockstepTime>().deltaTime;
+                    Assert.AreEqual(Position(plainManager, first), after, $"tick {tick}: the same step");
+                    Assert.AreEqual((after - before).Xz / deltaTime, recordedManager.GetComponentData<LockstepNavVelocity>(second).value, $"tick {tick}: the velocity is the step");
+                }
+                Assert.IsTrue(HasArrived(recordedManager, second));
+            }
+        }
+
+        [Test]
+        public void Avoidance_TwoGroupsCrossing_ArriveWithLessOverlap()
+        {
+            var avoiding = CrossGroups(true);
+            var plain = CrossGroups(false);
+            Assert.Less(avoiding, plain / 2, "avoidance halves how deep the agents walk into each other");
+        }
+
+        // Two lines of five agents walk through each other at right angles. Returns the sum over the ticks of the
+        // deepest overlap between two agents; with avoidance all must arrive.
+        private static double CrossGroups(bool isAvoiding)
+        {
+            using (var simulation = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
+            {
+                var entityManager = simulation.World.EntityManager;
+                var grid = CreateGrid(entityManager);
+                if (isAvoiding)
+                {
+                    CreateAvoidance(entityManager);
+                }
+                var radius = FixedPoint.FromFraction(2, 5);
+                var agents = new Entity[10];
+                for (var i = 0; i < 5; i++)
+                {
+                    var offset = (FixedPoint)(i - 2) * FixedPoint.FromFraction(6, 5);
+                    agents[i] = WithVelocity(entityManager, CreateAgent(entityManager, Point(-8, offset), 4, Point(8, offset), radius));
+                    agents[i + 5] = WithVelocity(entityManager, CreateAgent(entityManager, Point(offset, -8), 4, Point(offset, 8), radius));
+                }
+
+                var overlap = 0.0;
+                for (var tick = 1; tick <= 400 && !AllArrived(entityManager, agents); tick++)
+                {
+                    TestUtility.Step(simulation);
+                    var deepest = 0.0;
+                    for (var i = 0; i < agents.Length; i++)
+                    {
+                        Assert.IsTrue(IsWalkable(entityManager, grid, Position(entityManager, agents[i])));
+                        for (var j = 0; j < i; j++)
+                        {
+                            var distance = (double)FixedMath.Distance(Position(entityManager, agents[i]), Position(entityManager, agents[j]));
+                            deepest = Math.Max(deepest, 2 * (double)radius - distance);
+                        }
+                    }
+                    overlap += deepest;
+                }
+                Assert.IsTrue(!isAvoiding || AllArrived(entityManager, agents), "every agent got through");
+                return overlap;
+            }
+        }
+
+        [Test]
+        public void Clearance_CountsRingsToTheNearestBlockedCellOrEdge()
+        {
+            var grid = CreateGrid();
+            using (var cells = new NativeArray<LockstepNavCell>(grid.CellCount, Allocator.Temp))
+            {
+                // Cells (19, 19) to (20, 20): the square of 1 by 1 around the origin.
+                Block(grid, cells, FixedVector2.Zero, new FixedVector2(1, 1));
+                LockstepNavigation.UpdateClearance(grid, cells);
+
+                Assert.AreEqual(0, Clearance(grid, cells, 20, 20), "a blocked cell");
+                Assert.AreEqual(1, Clearance(grid, cells, 21, 20), "next to a blocked cell");
+                Assert.AreEqual(2, Clearance(grid, cells, 22, 21));
+                Assert.AreEqual(3, Clearance(grid, cells, 23, 23), "diagonal rings count like straight ones");
+                Assert.AreEqual(1, Clearance(grid, cells, 0, 7), "on the edge of the grid");
+                Assert.AreEqual(6, Clearance(grid, cells, 5, 5), "the edge is nearer than the block");
+            }
+        }
+
+        private static int Clearance(in LockstepNavGrid grid, NativeArray<LockstepNavCell> cells, int x, int y)
+        {
+            return cells[grid.GetIndex(new int2(x, y))].clearance;
+        }
+
+        [Test]
+        public void Clearance_OfABody_GrowsWithItsRadiusBeyondTheAgentRadius()
+        {
+            // Cells of half a unit.
+            var grid = CreateGrid(FixedPoint.FromFraction(1, 4));
+            Assert.AreEqual(1, LockstepNavigation.GetClearance(grid, FixedPoint.Zero));
+            Assert.AreEqual(1, LockstepNavigation.GetClearance(grid, FixedPoint.FromFraction(1, 4)), "as large as the agent radius: any walkable cell");
+            Assert.AreEqual(1, LockstepNavigation.GetClearance(grid, FixedPoint.FromFraction(9, 20)), "less than half a cell larger: still any walkable cell");
+            Assert.AreEqual(2, LockstepNavigation.GetClearance(grid, FixedPoint.FromFraction(3, 4)), "a cell larger: one ring more");
+            Assert.AreEqual(3, LockstepNavigation.GetClearance(grid, 1), "a cell and a half larger: two more");
+        }
+
+        [Test]
+        public void LargeAgent_GoesAroundThroughAGapItsBodyFits()
+        {
+            var small = CrossWallWithGaps(FixedPoint.FromFraction(1, 4), out var isSmallClear);
+            var large = CrossWallWithGaps(1, out var isLargeClear);
+            Assert.Less(small, 1.0, "a small agent takes the narrow gap on its way");
+            Assert.That(large, Is.InRange(3.0, 8.0), "a large one goes round through the wide gap");
+            Assert.IsTrue(isSmallClear && isLargeClear, "neither ever stood where its body does not fit");
+        }
+
+        // An agent of the radius walks from (-6, 0) to (6, 0) through a wall along Z at X 0 with a gap 1.5 units wide at Z 0
+        // and one 5 units wide between Z 3 and 8. Returns how far from Z 0 it crossed the wall; checks every tick that it
+        // stood on a cell its body fits in.
+        private static double CrossWallWithGaps(FixedPoint radius, out bool isClear)
+        {
+            using (var simulation = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
+            {
+                var entityManager = simulation.World.EntityManager;
+                var grid = CreateGrid(entityManager, FixedPoint.FromFraction(1, 4));
+                CreateWall(entityManager, new FixedVector2(0, FixedPoint.FromFraction(-43, 8)), new FixedVector2(1, FixedPoint.FromFraction(37, 4)));
+                CreateWall(entityManager, new FixedVector2(0, FixedPoint.FromFraction(15, 8)), new FixedVector2(1, FixedPoint.FromFraction(9, 4)));
+                CreateWall(entityManager, new FixedVector2(0, 9), new FixedVector2(1, 2));
+                var agent = CreateAgent(entityManager, Point(-6, 0), 4, Point(6, 0), radius);
+                var clearance = LockstepNavigation.GetClearance(entityManager.GetComponentData<LockstepNavGrid>(grid), radius);
+
+                isClear = true;
+                var crossing = double.NaN;
+                for (var tick = 1; tick <= 400 && !HasArrived(entityManager, agent); tick++)
+                {
+                    TestUtility.Step(simulation);
+                    var position = Position(entityManager, agent);
+                    var cells = entityManager.GetBuffer<LockstepNavCell>(grid).AsNativeArray();
+                    isClear &= LockstepNavigation.IsPassable(entityManager.GetComponentData<LockstepNavGrid>(grid), cells, position, clearance);
+                    if (double.IsNaN(crossing) && position.x >= FixedPoint.Zero)
+                    {
+                        crossing = Math.Abs((double)position.z);
+                    }
+                }
+                Assert.IsTrue(HasArrived(entityManager, agent), $"the agent of radius {radius} arrived");
+                return crossing;
+            }
+        }
+
+        [Test]
+        public void GroupSearch_GivesEveryAgentAPathAsShortAsItsOwn()
+        {
+            var grid = CreateGrid();
+            // Temp memory goes with the frame: the starts are written to.
+            var starts = new NativeArray<int>(9, Allocator.Temp);
+            using (var cells = new NativeArray<LockstepNavCell>(grid.CellCount, Allocator.Temp))
+            using (var chain = new NativeList<int>(Allocator.Temp))
+            using (var waypoints = new NativeList<FixedVector3>(Allocator.Temp))
+            using (var pathfinder = new LockstepPathfinder(grid.CellCount, Allocator.Temp))
+            {
+                // A wall across the way, open at its top.
+                Block(grid, cells, new FixedVector2(0, -2), new FixedVector2(1, 16));
+                var map = new LockstepNavPathMap(grid, cells);
+                var goal = Point(6, -4);
+                var positions = new FixedVector3[starts.Length];
+                var destinations = new FixedVector3[starts.Length];
+                for (var i = 0; i < starts.Length; i++)
+                {
+                    var offset = Point(FixedPoint.FromFraction(6, 5) * (i % 3 - 1), FixedPoint.FromFraction(6, 5) * (i / 3 - 1));
+                    positions[i] = Point(-6, -4) + offset;
+                    destinations[i] = goal + offset;
+                    Assert.IsTrue(LockstepPathfinder.TryGetStartCell(map, positions[i], out var cell));
+                    starts[i] = grid.GetIndex(cell);
+                }
+                Assert.IsTrue(LockstepPathfinder.TryGetEndCell(map, goal, out var goalCell, out _));
+
+                Assert.IsTrue(pathfinder.SearchGroup(map, grid.GetIndex(goalCell), starts), "one search reaches every agent");
+                var lengths = new double[starts.Length];
+                for (var i = 0; i < starts.Length; i++)
+                {
+                    pathfinder.GetChain(starts[i], chain);
+                    Assert.AreEqual(LockstepPathStatus.Complete, pathfinder.FollowChain(map, positions[i], destinations[i], chain.AsArray(), waypoints));
+                    Assert.AreEqual(destinations[i], waypoints[waypoints.Length - 1], $"agent {i} ends at its own destination");
+                    AssertWalkable(grid, cells, positions[i], waypoints);
+                    lengths[i] = GetLength(positions[i], waypoints);
+                }
+                for (var i = 0; i < starts.Length; i++)
+                {
+                    pathfinder.FindPath(map, positions[i], destinations[i], waypoints);
+                    Assert.LessOrEqual(lengths[i], GetLength(positions[i], waypoints) * 1.02 + 0.01, $"agent {i}: the shared search costs it no detour");
+                }
+            }
+        }
+
+        [Test]
+        public void GroupSearch_ToADestinationTheGoalDoesNotSee_LeavesTheAgentToPlanAlone()
+        {
+            var grid = CreateGrid();
+            var starts = new NativeArray<int>(1, Allocator.Temp);
+            using (var cells = new NativeArray<LockstepNavCell>(grid.CellCount, Allocator.Temp))
+            using (var chain = new NativeList<int>(Allocator.Temp))
+            using (var waypoints = new NativeList<FixedVector3>(Allocator.Temp))
+            using (var pathfinder = new LockstepPathfinder(grid.CellCount, Allocator.Temp))
+            {
+                // A wall across the grid with a gap at its right end: the goal is above it, the destination below.
+                Block(grid, cells, new FixedVector2(-1, 0), new FixedVector2(18, 1));
+                var map = new LockstepNavPathMap(grid, cells);
+                var start = Point(-6, 6);
+                var destination = Point(6, -6);
+                LockstepPathfinder.TryGetStartCell(map, start, out var startCell);
+                LockstepPathfinder.TryGetEndCell(map, Point(6, 6), out var goalCell, out _);
+                starts[0] = grid.GetIndex(startCell);
+
+                Assert.IsTrue(pathfinder.SearchGroup(map, grid.GetIndex(goalCell), starts));
+                pathfinder.GetChain(starts[0], chain);
+                Assert.AreEqual(LockstepPathStatus.Failed, pathfinder.FollowChain(map, start, destination, chain.AsArray(), waypoints),
+                    "the chain of the group does not lead there");
+                Assert.AreEqual(LockstepPathStatus.Complete, pathfinder.FindPath(map, start, destination, waypoints), "alone it finds the gap");
+            }
+        }
+
+        private static double GetLength(FixedVector3 start, NativeList<FixedVector3> waypoints)
+        {
+            var length = 0.0;
+            var from = start;
+            for (var i = 0; i < waypoints.Length; i++)
+            {
+                length += (double)FixedMath.Distance(from.Xz, waypoints[i].Xz);
+                from = waypoints[i];
+            }
+            return length;
+        }
+
+        [Test]
+        public void Agents_SentTogether_ArriveEachAtItsOwnPlace()
+        {
+            using (var simulation = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
+            {
+                var entityManager = simulation.World.EntityManager;
+                var grid = CreateGrid(entityManager, FixedPoint.FromFraction(1, 4));
+                CreateAvoidance(entityManager);
+                // A wall across the way, open at its top; the place of the last agent lies below a ledge the goal does not see past.
+                CreateWall(entityManager, new FixedVector2(0, -2), new FixedVector2(1, 16));
+                CreateWall(entityManager, new FixedVector2(FixedPoint.FromFraction(13, 2), FixedPoint.FromFraction(-13, 2)), new FixedVector2(5, FixedPoint.Half));
+                var goal = Point(6, -4);
+                var agents = new Entity[10];
+                var places = new FixedVector3[agents.Length];
+                for (var i = 0; i < agents.Length; i++)
+                {
+                    var offset = Point(FixedPoint.FromFraction(6, 5) * (i % 3 - 1), FixedPoint.FromFraction(6, 5) * (i / 3 - 1));
+                    places[i] = i < 9 ? goal + offset : Point(FixedPoint.FromFraction(13, 2), -8);
+                    agents[i] = WithVelocity(entityManager, CreateAgent(entityManager, Point(-6, -4) + offset, 4, default, FixedPoint.FromFraction(2, 5)));
+                    var agent = entityManager.GetComponentData<LockstepNavAgent>(agents[i]);
+                    agent.SetDestination(places[i], goal);
+                    entityManager.SetComponentData(agents[i], agent);
+                }
+
+                for (var tick = 1; tick <= 600 && !AllArrived(entityManager, agents); tick++)
+                {
+                    TestUtility.Step(simulation);
+                    foreach (var agent in agents)
+                    {
+                        Assert.IsTrue(IsWalkable(entityManager, grid, Position(entityManager, agent)), $"tick {tick}: an agent stands on a blocked cell");
+                    }
+                }
+                Assert.IsTrue(AllArrived(entityManager, agents), "every agent arrived");
+                // An agent that arrived first may be shouldered off its place by one walking past to a place behind it, so
+                // each only has to stand nearer its own place than any other.
+                for (var i = 0; i < agents.Length; i++)
+                {
+                    var position = Position(entityManager, agents[i]).Xz;
+                    var nearest = 0;
+                    for (var j = 1; j < places.Length; j++)
+                    {
+                        if (FixedMath.DistanceSquared(position, places[j].Xz) < FixedMath.DistanceSquared(position, places[nearest].Xz))
+                        {
+                            nearest = j;
+                        }
+                    }
+                    Assert.AreEqual(i, nearest, $"agent {i} stands at its own place");
+                }
+            }
+        }
+
+        [Test]
+        public void Avoidance_PathGoesAroundACrowdOfStandingAgents()
+        {
+            var avoiding = PassCrowd(true, out var pushed);
+            var plain = PassCrowd(false, out _);
+            Assert.Greater(avoiding, 2.0, "with avoidance the path goes around the crowd");
+            Assert.Less(pushed, 0.05, "and the crowd is not shouldered aside");
+            Assert.Less(plain, 0.01, "without it the path goes straight through");
+        }
+
+        // A walker crosses from (-8, 0) to (8, 0) past nine agents standing in a square at the origin. Returns how far its
+        // first path strays from the line along X; avoiding, walks it and returns in pushed how far the standing agents were
+        // pushed in all.
+        private static double PassCrowd(bool isAvoiding, out double pushed)
+        {
+            using (var simulation = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
+            {
+                var entityManager = simulation.World.EntityManager;
+                var grid = CreateGrid(entityManager, FixedPoint.Half);
+                if (isAvoiding)
+                {
+                    CreateAvoidance(entityManager);
+                }
+                var standers = new Entity[9];
+                for (var i = 0; i < standers.Length; i++)
+                {
+                    standers[i] = WithVelocity(entityManager, CreateAgent(entityManager, Point(i % 3 - 1, i / 3 - 1), 4, default, FixedPoint.Half));
+                }
+                var walker = WithVelocity(entityManager, CreateAgent(entityManager, Point(-8, 0), 4, Point(8, 0), FixedPoint.Half));
+
+                TestUtility.Step(simulation);
+                var stray = 0.0;
+                var path = entityManager.GetBuffer<LockstepNavWaypoint>(walker);
+                for (var i = 0; i < path.Length; i++)
+                {
+                    stray = Math.Max(stray, Math.Abs((double)path[i].position.z));
+                }
+
+                pushed = 0;
+                if (!isAvoiding)
+                {
+                    return stray;
+                }
+                WalkUntilArrived(simulation, grid, walker, 400);
+                for (var i = 0; i < standers.Length; i++)
+                {
+                    pushed += (double)FixedMath.Distance(Position(entityManager, standers[i]), Point(i % 3 - 1, i / 3 - 1));
+                }
+                return stray;
+            }
+        }
+
+        [Test]
+        public void Walkers_MeetingInAPassageOneBodyWide_SqueezePast()
+        {
+            Assert.IsTrue(MeetInPassage(true), "with avoidance");
+            Assert.IsTrue(MeetInPassage(false), "without avoidance");
+        }
+
+        // Two agents of radius 1/2 meet head on in a passage between walls 2 units apart, grown by the agent radius of the grid
+        // to 1 unit: one body wide. Returns whether both got through.
+        private static bool MeetInPassage(bool isAvoiding)
+        {
+            using (var simulation = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
+            {
+                var entityManager = simulation.World.EntityManager;
+                var grid = CreateGrid(entityManager, FixedPoint.Half);
+                if (isAvoiding)
+                {
+                    CreateAvoidance(entityManager);
+                }
+                CreateWall(entityManager, new FixedVector2(0, FixedPoint.FromFraction(3, 2)), new FixedVector2(12, 1));
+                CreateWall(entityManager, new FixedVector2(0, FixedPoint.FromFraction(-3, 2)), new FixedVector2(12, 1));
+                var agents = new[]
+                {
+                    WithVelocity(entityManager, CreateAgent(entityManager, Point(-8, 0), 4, Point(8, 0), FixedPoint.Half)),
+                    WithVelocity(entityManager, CreateAgent(entityManager, Point(8, 0), 4, Point(-8, 0), FixedPoint.Half)),
+                };
+
+                for (var tick = 1; tick <= 600 && !AllArrived(entityManager, agents); tick++)
+                {
+                    TestUtility.Step(simulation);
+                    foreach (var agent in agents)
+                    {
+                        Assert.IsTrue(IsWalkable(entityManager, grid, Position(entityManager, agent)), $"tick {tick}: an agent stands on a blocked cell");
+                    }
+                }
+                return AllArrived(entityManager, agents);
+            }
+        }
+
+        [Test]
+        public void Agent_WithAPace_WalksNoFasterThanIt()
+        {
+            using (var simulation = new LockstepSimulation(TestUtility.Config(), TestUtility.Options(NavigationSystems)))
+            {
+                var entityManager = simulation.World.EntityManager;
+                CreateGrid(entityManager);
+                var slowed = CreateAgent(entityManager, Point(-8, -2), 4, Point(8, -2));
+                var unhurried = CreateAgent(entityManager, Point(-8, 2), 2, Point(8, 2));
+                entityManager.SetComponentData(slowed, WithPace(entityManager.GetComponentData<LockstepNavAgent>(slowed), 2));
+                entityManager.SetComponentData(unhurried, WithPace(entityManager.GetComponentData<LockstepNavAgent>(unhurried), 4));
+
+                for (var tick = 0; tick < 30; tick++)
+                {
+                    TestUtility.Step(simulation);
+                }
+                Assert.AreEqual(-6.0, (double)Position(entityManager, slowed).x, 0.01, "kept to the pace, slower than its speed");
+                Assert.AreEqual(-6.0, (double)Position(entityManager, unhurried).x, 0.01, "a pace faster than its speed does not hurry it");
+            }
+        }
+
+        private static LockstepNavAgent WithPace(LockstepNavAgent agent, FixedPoint pace)
+        {
+            agent.pace = pace;
+            return agent;
+        }
+
+        [Test]
         public void Session_AgentsWalkTheSamePathsOnEveryClient()
+        {
+            RunSession(false);
+        }
+
+        [Test]
+        public void Session_AvoidingAgentsWalkTheSamePathsOnEveryClient()
+        {
+            RunSession(true);
+        }
+
+        private static void RunSession(bool isAvoiding)
         {
             var settings = LockstepServerSettings.Default;
             settings.TickRate = 30;
@@ -770,8 +1313,8 @@ namespace Pragma.Lockstep.Tests
 
             using (var session = new SessionHarness(settings, latency: 0.05, jitter: 0.04))
             {
-                var first = session.AddClient(SessionOptions());
-                var second = session.AddClient(SessionOptions());
+                var first = session.AddClient(SessionOptions(isAvoiding));
+                var second = session.AddClient(SessionOptions(isAvoiding));
                 session.Run(14);
 
                 Assert.IsEmpty(session.Desyncs);
@@ -789,21 +1332,25 @@ namespace Pragma.Lockstep.Tests
                         for (var i = 0; i < agents.Length; i++)
                         {
                             Assert.AreEqual(LockstepNavStatus.Arrived, agents[i].status);
-                            Assert.AreEqual(targets[i].back, transforms[i].position, "every agent walked back home");
+                            Assert.LessOrEqual((double)FixedMath.Distance(targets[i].back, transforms[i].position), isAvoiding ? 0.01 : 0.0, "every agent walked back home");
                         }
                     }
                 }
             }
         }
 
-        private static LockstepSimulationOptions SessionOptions()
+        private static LockstepSimulationOptions SessionOptions(bool isAvoiding)
         {
             var options = TestUtility.Options(typeof(LockstepNavSystemGroup), typeof(LockstepNavObstacleSystem), typeof(LockstepNavPathSystem),
-                typeof(LockstepNavMoveSystem), typeof(LockstepNavSeparationSystem), typeof(TestNavigationSystem));
+                typeof(LockstepNavAvoidanceSystem), typeof(LockstepNavMoveSystem), typeof(LockstepNavSeparationSystem), typeof(TestNavigationSystem));
             options.Initialize = world =>
             {
                 var entityManager = world.EntityManager;
                 var grid = CreateGrid(entityManager, FixedPoint.FromFraction(1, 4));
+                if (isAvoiding)
+                {
+                    CreateAvoidance(entityManager);
+                }
                 // A round hill in the middle, two units high: the agents walk over it, and end on the plain at Y 0.
                 var state = entityManager.GetComponentData<LockstepNavGrid>(grid);
                 var heights = entityManager.AddBuffer<LockstepNavHeight>(grid);
@@ -820,9 +1367,20 @@ namespace Pragma.Lockstep.Tests
                 {
                     var z = (FixedPoint)(i * 3 - 7);
                     var agent = CreateAgent(entityManager, Point(-8, z), 3 + i, default);
-                    // Their ways cross in the middle, where they push each other apart.
+                    // Their ways cross in the middle, where they push each other apart. Avoiding, they go as one group
+                    // there and back, sharing one search each way.
                     entityManager.SetComponentData(agent, new LockstepNavAgent { speed = 3 + i, angularSpeed = FixedMath.Pi, radius = FixedPoint.FromFraction(2, 5) });
-                    entityManager.AddComponentData(agent, new TestNavigationTarget { there = Point(8, -z), back = Point(-8, z) });
+                    entityManager.AddComponentData(agent, new TestNavigationTarget
+                    {
+                        there = Point(8, -z),
+                        back = Point(-8, z),
+                        thereGoal = isAvoiding ? Point(8, 0) : Point(8, -z),
+                        backGoal = isAvoiding ? Point(-8, 0) : Point(-8, z),
+                    });
+                    if (isAvoiding)
+                    {
+                        WithVelocity(entityManager, agent);
+                    }
                 }
             };
             return options;
@@ -855,6 +1413,37 @@ namespace Pragma.Lockstep.Tests
             }
             entityManager.SetComponentData(agent, state);
             return agent;
+        }
+
+        // Local avoidance with the default settings, as a LockstepNavAvoidanceAuthoring bakes it.
+        private static void CreateAvoidance(EntityManager entityManager)
+        {
+            var avoidance = entityManager.CreateEntity(typeof(LockstepNavAvoidance));
+            entityManager.SetComponentData(avoidance, LockstepNavAvoidance.Default);
+        }
+
+        // The agent takes part in avoidance, as LockstepNavAgentAuthoring bakes it.
+        private static Entity WithVelocity(EntityManager entityManager, Entity agent)
+        {
+            entityManager.AddComponent<LockstepNavVelocity>(agent);
+            return agent;
+        }
+
+        private static bool HasArrived(EntityManager entityManager, Entity agent)
+        {
+            return entityManager.GetComponentData<LockstepNavAgent>(agent).status == LockstepNavStatus.Arrived;
+        }
+
+        private static bool AllArrived(EntityManager entityManager, Entity[] agents)
+        {
+            foreach (var agent in agents)
+            {
+                if (!HasArrived(entityManager, agent))
+                {
+                    return false;
+                }
+            }
+            return true;
         }
 
         // Steps until the agent arrives, checking on every tick that it stands on a walkable cell. Returns the ticks taken.

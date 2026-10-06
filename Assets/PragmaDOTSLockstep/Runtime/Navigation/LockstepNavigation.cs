@@ -76,6 +76,89 @@ namespace Pragma.Lockstep.Navigation
             return IsWalkable(grid, cells, grid.WorldToCell(position));
         }
 
+        /// <summary>
+        /// The clearance (<see cref="LockstepNavCell.clearance"/>) a cell needs for the body of an agent of
+        /// <paramref name="radius"/> to stand on it clear of obstacles: 1, any walkable cell, for a body up to the grid's
+        /// <see cref="LockstepNavGrid.agentRadius"/>, which obstacles are grown by; one more for every cell size the body
+        /// is larger, rounded to the nearest, as cells only approximate obstacles anyway. At most 255.
+        /// </summary>
+        public static int GetClearance(in LockstepNavGrid grid, FixedPoint radius)
+        {
+            var extra = radius.rawValue - grid.agentRadius.rawValue;
+            if (extra <= 0 || grid.cellSize.rawValue <= 0)
+            {
+                return 1;
+            }
+            var size = grid.cellSize.rawValue;
+            return (int)math.min(1 + (extra + size / 2) / size, byte.MaxValue);
+        }
+
+        /// <summary>
+        /// A body that needs <paramref name="clearance"/> (<see cref="GetClearance"/>) fits on the cell: it is inside the
+        /// grid and walkable, and above a clearance of 1, its <see cref="LockstepNavCell.clearance"/> is at least that.
+        /// </summary>
+        public static bool IsPassable(in LockstepNavGrid grid, NativeArray<LockstepNavCell> cells, int2 cell, int clearance)
+        {
+            if (!grid.Contains(cell))
+            {
+                return false;
+            }
+            var data = cells[grid.GetIndex(cell)];
+            return clearance <= 1 ? data.blockers == 0 : data.clearance >= clearance;
+        }
+
+        /// <summary>The cell under the position is passable for the clearance; Y is ignored.</summary>
+        public static bool IsPassable(in LockstepNavGrid grid, NativeArray<LockstepNavCell> cells, FixedVector3 position, int clearance)
+        {
+            return IsPassable(grid, cells, grid.WorldToCell(position), clearance);
+        }
+
+        /// <summary>
+        /// Where a step (X and Z) from a position may end without entering a blocked cell: the whole step, else only
+        /// its X part, else only its Z part, so whatever walks or is pushed into a wall slides along it. False when
+        /// none of them is walkable. A step from a blocked cell is free: whatever stands in an obstacle is on its way
+        /// out of it. Y is kept.
+        /// </summary>
+        public static bool TryStep(in LockstepNavGrid grid, NativeArray<LockstepNavCell> cells, FixedVector3 from, FixedVector2 step, out FixedVector3 position)
+        {
+            return TryStep(grid, cells, from, step, 1, out position);
+        }
+
+        /// <summary>
+        /// <see cref="TryStep(in LockstepNavGrid, NativeArray{LockstepNavCell}, FixedVector3, FixedVector2, out FixedVector3)"/>
+        /// for a body that needs <paramref name="clearance"/>: the step ends on a cell passable for it. From a cell too
+        /// narrow for it, the step only has to end on a walkable cell, so the body can get out (<see cref="GetStepClearance"/>).
+        /// </summary>
+        public static bool TryStep(in LockstepNavGrid grid, NativeArray<LockstepNavCell> cells, FixedVector3 from, FixedVector2 step, int clearance, out FixedVector3 position)
+        {
+            position = new FixedVector3(from.x + step.x, from.y, from.z + step.y);
+            if (!IsWalkable(grid, cells, from))
+            {
+                return true;
+            }
+            clearance = GetStepClearance(grid, cells, from, clearance);
+            if (IsPassable(grid, cells, position, clearance))
+            {
+                return true;
+            }
+            position = new FixedVector3(from.x + step.x, from.y, from.z);
+            if (step.x.rawValue != 0 && IsPassable(grid, cells, position, clearance))
+            {
+                return true;
+            }
+            position = new FixedVector3(from.x, from.y, from.z + step.y);
+            return step.y.rawValue != 0 && IsPassable(grid, cells, position, clearance);
+        }
+
+        /// <summary>
+        /// The clearance a step from <paramref name="from"/> has to end on: the body's own, or 1 when the body already
+        /// stands on a cell too narrow for it (pushed there, or an obstacle placed next to it) and is on its way out.
+        /// </summary>
+        public static int GetStepClearance(in LockstepNavGrid grid, NativeArray<LockstepNavCell> cells, FixedVector3 from, int clearance)
+        {
+            return clearance > 1 && !IsPassable(grid, cells, from, clearance) ? 1 : clearance;
+        }
+
         /// <summary>Every cell the segment touches is walkable; Y is ignored.</summary>
         public static bool HasLineOfSight(in LockstepNavGrid grid, NativeArray<LockstepNavCell> cells, FixedVector3 from, FixedVector3 to)
         {
@@ -89,9 +172,41 @@ namespace Pragma.Lockstep.Navigation
         /// </summary>
         public static bool HasLineOfSight(in LockstepNavGrid grid, NativeArray<LockstepNavCell> cells, FixedVector2 from, FixedVector2 to)
         {
+            return HasLineOfSight(grid, cells, from, to, 1);
+        }
+
+        /// <summary>Every cell the segment between two world positions (X and Z) touches is passable for the clearance.</summary>
+        public static bool HasLineOfSight(in LockstepNavGrid grid, NativeArray<LockstepNavCell> cells, FixedVector2 from, FixedVector2 to, int clearance)
+        {
+            var test = new PassableTest { grid = grid, cells = cells, clearance = clearance };
+            return Trace(grid, from, to, ref test);
+        }
+
+        /// <summary>A test of the cells a segment touches (<see cref="Trace{T}"/>).</summary>
+        internal interface ICellTest
+        {
+            bool IsOpen(int2 cell);
+        }
+
+        private struct PassableTest : ICellTest
+        {
+            public LockstepNavGrid grid;
+            public NativeArray<LockstepNavCell> cells;
+            public int clearance;
+
+            public bool IsOpen(int2 cell) => IsPassable(grid, cells, cell, clearance);
+        }
+
+        /// <summary>
+        /// Every cell the segment between two world positions (X and Z) touches passes the test, the cell it starts in
+        /// first. Exact: the segment is traced through the cell borders with integer math, and where it passes exactly
+        /// through a cell corner, both cells beside the corner count.
+        /// </summary>
+        internal static bool Trace<T>(in LockstepNavGrid grid, FixedVector2 from, FixedVector2 to, ref T test) where T : struct, ICellTest
+        {
             var cell = grid.WorldToCell(from);
             var last = grid.WorldToCell(to);
-            if (!IsWalkable(grid, cells, cell))
+            if (!test.IsOpen(cell))
             {
                 return false;
             }
@@ -137,7 +252,7 @@ namespace Pragma.Lockstep.Navigation
                     }
                     else
                     {
-                        if (!IsWalkable(grid, cells, new int2(cell.x + stepX, cell.y)) || !IsWalkable(grid, cells, new int2(cell.x, cell.y + stepY)))
+                        if (!test.IsOpen(new int2(cell.x + stepX, cell.y)) || !test.IsOpen(new int2(cell.x, cell.y + stepY)))
                         {
                             return false;
                         }
@@ -146,7 +261,7 @@ namespace Pragma.Lockstep.Navigation
                     }
                 }
 
-                if (!IsWalkable(grid, cells, next))
+                if (!test.IsOpen(next))
                 {
                     return false;
                 }
@@ -162,8 +277,17 @@ namespace Pragma.Lockstep.Navigation
         /// </summary>
         public static bool TryFindNearestWalkable(in LockstepNavGrid grid, NativeArray<LockstepNavCell> cells, int2 cell, out int2 nearest)
         {
+            return TryFindNearestPassable(grid, cells, cell, 1, out nearest);
+        }
+
+        /// <summary>
+        /// The cell passable for the clearance nearest to a cell of the grid, by distance between the centres: the cell
+        /// itself when it is passable. Ties go to the cell found first, scanning rings row by row.
+        /// </summary>
+        public static bool TryFindNearestPassable(in LockstepNavGrid grid, NativeArray<LockstepNavCell> cells, int2 cell, int clearance, out int2 nearest)
+        {
             nearest = cell;
-            if (IsWalkable(grid, cells, cell))
+            if (IsPassable(grid, cells, cell, clearance))
             {
                 return true;
             }
@@ -186,7 +310,7 @@ namespace Pragma.Lockstep.Navigation
                     {
                         var candidate = new int2(cell.x + dx, cell.y + dy);
                         var distance = (long)dx * dx + (long)dy * dy;
-                        if (distance >= nearestDistance || !IsWalkable(grid, cells, candidate))
+                        if (distance >= nearestDistance || !IsPassable(grid, cells, candidate, clearance))
                         {
                             continue;
                         }
@@ -224,10 +348,76 @@ namespace Pragma.Lockstep.Navigation
                         continue;
                     }
                     var index = grid.GetIndex(cell);
-                    var blockers = math.clamp(cells[index].blockers + count, 0, ushort.MaxValue);
-                    cells[index] = new LockstepNavCell { blockers = (ushort)blockers };
+                    var data = cells[index];
+                    data.blockers = (ushort)math.clamp(data.blockers + count, 0, ushort.MaxValue);
+                    cells[index] = data;
                 }
             }
+        }
+
+        /// <summary>
+        /// Computes the <see cref="LockstepNavCell.clearance"/> of every cell from the blocked ones: the Chebyshev distance
+        /// to the nearest blocked cell, the outside of the grid counting as blocked, at most 255. Two passes over the grid,
+        /// so call it once after a batch of stamps: <see cref="LockstepNavObstacleSystem"/> does it whenever a cell changed.
+        /// </summary>
+        public static void UpdateClearance(in LockstepNavGrid grid, NativeArray<LockstepNavCell> cells)
+        {
+            if (!grid.IsValid || cells.Length != grid.CellCount)
+            {
+                return;
+            }
+
+            // Forward: from the cells already visited, left and below.
+            for (var y = 0; y < grid.height; y++)
+            {
+                for (var x = 0; x < grid.width; x++)
+                {
+                    var index = y * grid.width + x;
+                    var data = cells[index];
+                    if (data.blockers != 0)
+                    {
+                        data.clearance = 0;
+                    }
+                    else
+                    {
+                        var value = math.min(GetRing(grid, cells, x - 1, y), GetRing(grid, cells, x - 1, y - 1));
+                        value = math.min(value, math.min(GetRing(grid, cells, x, y - 1), GetRing(grid, cells, x + 1, y - 1)));
+                        data.clearance = (byte)math.min(value + 1, byte.MaxValue);
+                    }
+                    cells[index] = data;
+                }
+            }
+
+            // Backward: from the cells right and above, which the forward pass could not see.
+            for (var y = grid.height - 1; y >= 0; y--)
+            {
+                for (var x = grid.width - 1; x >= 0; x--)
+                {
+                    var index = y * grid.width + x;
+                    var data = cells[index];
+                    if (data.blockers != 0)
+                    {
+                        continue;
+                    }
+                    var value = math.min(GetRing(grid, cells, x + 1, y), GetRing(grid, cells, x + 1, y + 1));
+                    value = math.min(value, math.min(GetRing(grid, cells, x, y + 1), GetRing(grid, cells, x - 1, y + 1)));
+                    if (value + 1 < data.clearance)
+                    {
+                        data.clearance = (byte)(value + 1);
+                        cells[index] = data;
+                    }
+                }
+            }
+        }
+
+        // The clearance of a neighbour in the passes of UpdateClearance; outside the grid is blocked.
+        private static int GetRing(in LockstepNavGrid grid, NativeArray<LockstepNavCell> cells, int x, int y)
+        {
+            if (x < 0 || y < 0 || x >= grid.width || y >= grid.height)
+            {
+                return 0;
+            }
+            return cells[y * grid.width + x].clearance;
         }
 
         /// <summary>

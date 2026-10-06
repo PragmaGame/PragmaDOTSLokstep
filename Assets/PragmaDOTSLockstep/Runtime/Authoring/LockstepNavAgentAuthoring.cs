@@ -6,8 +6,9 @@ using UnityEngine;
 namespace Pragma.Lockstep.Authoring
 {
     /// <summary>
-    /// Bakes a <see cref="LockstepNavAgent"/> and its empty path: entities of this prefab walk to destinations around the
-    /// obstacles of the navigation grid.
+    /// Bakes a <see cref="LockstepNavAgent"/>, its empty path and its <see cref="LockstepNavVelocity"/>: entities of
+    /// this prefab walk to destinations around the obstacles of the navigation grid and, with a radius, avoid each
+    /// other while the world has a <see cref="LockstepNavAvoidance"/>.
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(LockstepTransformAuthoring))]
@@ -23,7 +24,7 @@ namespace Pragma.Lockstep.Authoring
         [SerializeField, Min(0f), Tooltip("The agent stops this close to the end of its path.")]
         private float _stoppingDistance;
 
-        [SerializeField, Min(0f), Tooltip("Radius of the agent's body: overlapping agents are pushed apart. 0 neither pushes nor is pushed.")]
+        [SerializeField, Min(0f), Tooltip("Radius of the agent's body: overlapping agents are pushed apart and walking ones avoid each other; a body larger than the grid's agent radius keeps to cells with room for it. 0 neither pushes nor is pushed nor avoids.")]
         private float _radius;
 
         private sealed class Baker : Baker<LockstepNavAgentAuthoring>
@@ -39,6 +40,7 @@ namespace Pragma.Lockstep.Authoring
                     radius = (FixedPoint)authoring._radius,
                 });
                 AddBuffer<LockstepNavWaypoint>(entity);
+                AddComponent<LockstepNavVelocity>(entity);
             }
         }
     }

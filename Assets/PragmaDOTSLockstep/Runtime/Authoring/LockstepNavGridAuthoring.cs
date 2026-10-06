@@ -33,7 +33,7 @@ namespace Pragma.Lockstep.Authoring
         [SerializeField, Min(0.05f), Tooltip("Side of a cell in world units. Smaller cells follow obstacles closer and take longer to search.")]
         private float _cellSize = 0.5f;
 
-        [SerializeField, Min(0f), Tooltip("Radius of the agents: paths keep their centres this far from obstacles.")]
+        [SerializeField, Min(0f), Tooltip("Radius of the common agents: paths keep their centres this far from obstacles. Larger bodies (vehicles) keep to cells with as much more room as they are larger.")]
         private float _agentRadius = 0.5f;
 
         [SerializeField, Tooltip("Ground agents walk on: a terrain covering the grid exactly. Empty: flat ground, agents keep their Y.")]

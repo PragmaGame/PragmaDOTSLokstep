@@ -268,7 +268,8 @@ foreach (var (player, commands, commandData) in
 Units that walk around obstacles use `Pragma.Lockstep.Navigation` (assembly reference `Pragma.Lockstep.Navigation`):
 
 - **Grid.** One `LockstepNavGrid` per simulation world, baked with `LockstepNavGridAuthoring` into the map subscene
-  (a scene entity): size, cell size, agent radius. Its `LockstepNavCell` buffer counts the obstacles over each cell.
+  (a scene entity): size, cell size, agent radius (that of the common units). Its `LockstepNavCell` buffer counts the
+  obstacles over each cell and keeps its clearance (rings of free cells around it).
 - **Ground.** For hilly maps the authoring samples a `TerrainData` (world Y, steepest walkable slope in degrees) into the
   `LockstepNavHeight` buffer: agents walk on the ground (Y is set by navigation, never walked to), cells steeper than
   `LockstepNavGrid.maxSlope` are blocked for good. Put whatever you place on the map on the ground with
@@ -281,17 +282,31 @@ Units that walk around obstacles use `Pragma.Lockstep.Navigation` (assembly refe
   `agent.ValueRW.SetDestination(target)` from a system with `[UpdateBefore(typeof(LockstepNavSystemGroup))]` and reads
   `status` (`Requested`, `Moving`, `Arrived`) and `isPathPartial`. Never write `LockstepTransform` of a walking agent
   yourself; call `Stop()` first.
-- **Queries.** `LockstepNavigation.IsWalkable`, `HasLineOfSight`, `TryFindNearestWalkable` for AI;
-  `IsClear(grid, cells, footprint)` for where a building may be placed (every cell it would block is inside the grid and
-  walkable), `GetCoverage` and `Covers` to compare footprints not stamped yet (placements of the same tick);
-  `LockstepPathfinder` (scratch memory, one per thread) for paths outside agents.
+- **Groups.** Send the agents of one order with `SetDestination(place, groupGoal)` — each to its own place around the
+  point of the order, `groupGoal` the point: the order costs one search for all of them (`LockstepNavPathSystem` groups
+  the requests of a tick by goal cell and body clearance). `agent.pace` keeps an agent to the pace of the group it walks
+  with (the slowest member's speed; 0 — its own); `WalkSpeed` is what it walks at.
+- **Large bodies.** A radius larger than the grid's agent radius needs clearance (`LockstepNavigation.GetClearance`):
+  paths, steps and pushes keep such an agent (a vehicle) to cells with room for its body. Spawn it on such a cell
+  (`IsPassable` with its clearance, `TryFindNearestPassable`), and give a weapon that strikes from its centre a reach
+  longer than the body and the clearance around it.
+- **Queries.** `LockstepNavigation.IsWalkable`, `IsPassable`, `HasLineOfSight`, `TryFindNearestWalkable`,
+  `TryFindNearestPassable` for AI; `IsClear(grid, cells, footprint)` for where a building may be placed (every cell it
+  would block is inside the grid and walkable), `GetCoverage` and `Covers` to compare footprints not stamped yet
+  (placements of the same tick); `LockstepPathfinder` (scratch memory, one per thread; `LockstepNavPathMap` for a body
+  size) for paths outside agents. After stamping cells yourself, call `UpdateClearance`.
 - **Standing in an obstacle.** An idle or arrived agent whose cell becomes blocked (a building placed on it, a unit
   spawned or stopped inside one) walks to the nearest walkable cell by itself.
 - **Keeping apart.** Agents with a `radius` are pushed apart where they overlap (`LockstepNavSeparationSystem`, after
-  they walked; a walking agent gives way to a standing one), never onto a blocked cell; paths do not go around other
-  agents, and a standing agent may be shouldered a little off its spot. Spread the destinations of a group
-  (formation places) rather than sending it to one point. See `references/simulation-api.md` and the README section
-  *Navigation*.
+  they walked; a walking agent gives way to a standing one; two walking opposite ways only step aside, and squeeze past
+  in a passage one body wide), never onto a cell the body does not fit in; a standing agent may be shouldered a little
+  off its spot. Spread the destinations of a group (formation places) rather than sending it to one point.
+- **Avoiding.** Add the `LockstepNavAvoidance` singleton (`LockstepNavAvoidanceAuthoring`, or from your match settings
+  before tick 0) and walking agents with a radius and a `LockstepNavVelocity` (baked by `LockstepNavAgentAuthoring`)
+  steer around each other (`LockstepNavAvoidanceSystem`, a parallel job; deterministic), push through crowds they cannot
+  go around and never step onto blocked cells; paths go around crowds of standing agents (`crowdCost`). Leave the
+  singleton out to turn it off: agents plan and walk exactly as without it. `LockstepNavVelocity.value` is what an
+  agent walked on its last step. See `references/simulation-api.md` and the README section *Navigation*.
 
 ## Vision
 

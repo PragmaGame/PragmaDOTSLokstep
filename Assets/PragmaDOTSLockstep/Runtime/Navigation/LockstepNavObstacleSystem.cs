@@ -6,7 +6,8 @@ namespace Pragma.Lockstep.Navigation
 {
     /// <summary>
     /// Keeps the cells of the <see cref="LockstepNavGrid"/> in step with the obstacles: stamps new ones, moves the ones
-    /// whose transform or rectangle changed, releases the destroyed ones, and changes the grid version when any cell did.
+    /// whose transform or rectangle changed, releases the destroyed ones, and when any cell changed, computes the
+    /// clearance of the cells again (<see cref="LockstepNavigation.UpdateClearance"/>) and changes the grid version.
     /// </summary>
     /// <remarks>
     /// Cells count the obstacles over them, so stamping and releasing commute and the cells do not depend on the order
@@ -103,6 +104,7 @@ namespace Pragma.Lockstep.Navigation
             commands.Playback(state.EntityManager);
             if (isChanged)
             {
+                LockstepNavigation.UpdateClearance(grid, SystemAPI.GetBuffer<LockstepNavCell>(gridEntity).AsNativeArray());
                 grid.version++;
                 SystemAPI.SetComponent(gridEntity, grid);
             }

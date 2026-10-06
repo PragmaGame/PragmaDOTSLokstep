@@ -1,4 +1,3 @@
-using System;
 using Pragma.Lockstep.Mathematics;
 using Unity.Burst;
 using Unity.Collections;
@@ -13,9 +12,11 @@ namespace Pragma.Lockstep.Navigation
     /// <see cref="LockstepNavAgent.radius"/> are pushed apart by half of the overlap per tick, so a crowd spreads out over
     /// a few ticks instead of jumping. Two walking or two standing agents share the push equally; a walking agent takes
     /// three quarters of it from a standing one, so it slides past a unit that holds its place, yet still shoulders its
-    /// way to a destination that unit stands on. An agent is never pushed onto a blocked cell of the grid, a pushed agent
-    /// stays on the ground of the grid (<see cref="LockstepNavHeight"/>), and an agent with a zero radius neither pushes
-    /// nor is pushed.
+    /// way to a destination that unit stands on. Two agents walking opposite ways (by their last steps,
+    /// <see cref="LockstepNavVelocity"/>) are only pushed sideways, each to its own side, never back: they step aside and
+    /// pass, and in a passage too narrow to step aside in, they squeeze past each other instead of blocking it for good.
+    /// An agent is never pushed onto a cell its body does not fit in, a pushed agent stays on the ground of the grid
+    /// (<see cref="LockstepNavHeight"/>), and an agent with a zero radius neither pushes nor is pushed.
     /// </summary>
     /// <remarks>
     /// An agent's push is the sum of the pushes of its neighbours, each a function of the pair alone, summed in exact
@@ -43,6 +44,7 @@ namespace Pragma.Lockstep.Navigation
             var job = new SeparateJob
             {
                 transformLookup = SystemAPI.GetComponentLookup<LockstepTransform>(),
+                velocityLookup = SystemAPI.GetComponentLookup<LockstepNavVelocity>(true),
             };
             if (SystemAPI.TryGetSingleton<LockstepNavGrid>(out var grid) &&
                 grid.IsValid &&
@@ -75,23 +77,13 @@ namespace Pragma.Lockstep.Navigation
             state.Dependency = job.Schedule(JobHandle.CombineDependencies(entitiesHandle, agentsHandle, transformsHandle));
         }
 
-        /// <summary>An agent in the spatial hash: its hash cell, then its index in the query.</summary>
-        private struct HashedAgent : IComparable<HashedAgent>
-        {
-            public long cell;
-            public int index;
-
-            public int CompareTo(HashedAgent other)
-            {
-                return cell != other.cell ? cell.CompareTo(other.cell) : index.CompareTo(other.index);
-            }
-        }
-
         [BurstCompile]
         private struct SeparateJob : IJob
         {
             // Agents closer than this are taken to stand on the same point: the direction between them is noise.
             private const long MIN_DISTANCE_RAW = FixedPoint.ONE_RAW / 1024;
+            // Two walkers whose offset is this close to their heading meet head on: sideways of it is noise.
+            private const long MIN_SIDEWAYS_RAW = FixedPoint.ONE_RAW / 64;
             // Shares of the overlap, in eighths, that an agent of an overlapping pair moves per tick: half of the overlap
             // is gone per tick, split equally, or three to one when only one of the two walks.
             private const int EQUAL_SHARE = 2;
@@ -103,6 +95,7 @@ namespace Pragma.Lockstep.Navigation
             [ReadOnly] public NativeList<LockstepNavAgent> agents;
             [ReadOnly] public NativeList<LockstepTransform> transforms;
             public ComponentLookup<LockstepTransform> transformLookup;
+            [ReadOnly] public ComponentLookup<LockstepNavVelocity> velocityLookup;
             public LockstepNavGrid grid;
             [ReadOnly] public NativeArray<LockstepNavCell> cells;
             public bool hasGrid;
@@ -121,29 +114,33 @@ namespace Pragma.Lockstep.Navigation
                     return;
                 }
 
+                // What every agent walked last, zero for agents that do not record it.
+                var velocities = new NativeArray<FixedVector2>(agents.Length, Allocator.Temp);
                 // Neighbours of an agent are at most two radii away, so they are in its hash cell or the eight around it.
-                var cellSize = maxRadius.rawValue * 2;
-                var hashed = new NativeList<HashedAgent>(agents.Length, Allocator.Temp);
+                var hash = new LockstepNavAgentHash(agents.Length, maxRadius * 2, Allocator.Temp);
                 for (var i = 0; i < agents.Length; i++)
                 {
                     if (agents[i].radius.rawValue > 0)
                     {
-                        var position = transforms[i].position;
-                        hashed.Add(new HashedAgent { cell = Key(FloorDivide(position.x.rawValue, cellSize), FloorDivide(position.z.rawValue, cellSize)), index = i });
+                        hash.Add(transforms[i].position.Xz, i);
+                        if (velocityLookup.TryGetComponent(entities[i], out var velocity))
+                        {
+                            velocities[i] = velocity.value;
+                        }
                     }
                 }
-                hashed.Sort();
+                hash.Sort();
 
-                for (var h = 0; h < hashed.Length; h++)
+                for (var entry = 0; entry < hash.Count; entry++)
                 {
-                    var index = hashed[h].index;
-                    var push = GetPush(index, hashed, cellSize);
+                    var index = hash.GetIndex(entry);
+                    var push = GetPush(index, hash, velocities);
                     if (push.x.rawValue == 0 && push.y.rawValue == 0)
                     {
                         continue;
                     }
                     var transform = transforms[index];
-                    if (TryMove(transform.position, push, out var position))
+                    if (TryMove(transform.position, push, LockstepNavigation.GetClearance(grid, agents[index].radius), out var position))
                     {
                         transform.position = hasHeights ? LockstepNavigation.ToGround(grid, heights, position) : position;
                         transformLookup[entities[index]] = transform;
@@ -152,24 +149,23 @@ namespace Pragma.Lockstep.Navigation
             }
 
             // The sum of the pushes of the neighbours, at most the agent's radius per tick.
-            private FixedVector2 GetPush(int index, NativeList<HashedAgent> hashed, long cellSize)
+            private FixedVector2 GetPush(int index, in LockstepNavAgentHash hash, NativeArray<FixedVector2> velocities)
             {
                 var position = transforms[index].position.Xz;
                 var radius = agents[index].radius;
-                var cellX = FloorDivide(position.x.rawValue, cellSize);
-                var cellZ = FloorDivide(position.y.rawValue, cellSize);
+                var cellX = hash.GetCell(position.x);
+                var cellZ = hash.GetCell(position.y);
                 var push = FixedVector2.Zero;
                 for (var dz = -1; dz <= 1; dz++)
                 {
                     for (var dx = -1; dx <= 1; dx++)
                     {
-                        var key = Key(cellX + dx, cellZ + dz);
-                        for (var h = LowerBound(hashed, key); h < hashed.Length && hashed[h].cell == key; h++)
+                        for (var entry = hash.GetFirst(cellX + dx, cellZ + dz); hash.IsInCell(entry, cellX + dx, cellZ + dz); entry++)
                         {
-                            var other = hashed[h].index;
+                            var other = hash.GetIndex(entry);
                             if (other != index)
                             {
-                                push += GetPairPush(index, position, radius, other);
+                                push += GetPairPush(index, position, radius, other, velocities);
                             }
                         }
                     }
@@ -178,7 +174,7 @@ namespace Pragma.Lockstep.Navigation
             }
 
             // How far the other agent pushes this one, away from it.
-            private FixedVector2 GetPairPush(int index, FixedVector2 position, FixedPoint radius, int other)
+            private FixedVector2 GetPairPush(int index, FixedVector2 position, FixedPoint radius, int other, NativeArray<FixedVector2> velocities)
             {
                 var offset = position - transforms[other].position.Xz;
                 var limit = radius + agents[other].radius;
@@ -193,7 +189,33 @@ namespace Pragma.Lockstep.Navigation
                 }
                 var distance = FixedMath.Sqrt(distanceSquared);
                 var direction = distance.rawValue > MIN_DISTANCE_RAW ? offset / distance : GetTieBreak(index, other);
-                return direction * ((limit - distance) * GetShare(agents[index].IsMoving, agents[other].IsMoving) / SHARE_DENOMINATOR);
+                var isWalking = agents[index].IsMoving;
+                var isOtherWalking = agents[other].IsMoving;
+                if (isWalking && isOtherWalking && TryGetPassing(velocities[index], velocities[other], ref direction))
+                {
+                    return direction * ((limit - distance) * EQUAL_SHARE / SHARE_DENOMINATOR);
+                }
+                return direction * ((limit - distance) * GetShare(isWalking, isOtherWalking) / SHARE_DENOMINATOR);
+            }
+
+            // Two walkers going opposite ways pass each other: the push turns sideways to the agent's heading, towards the
+            // side the other one is not on, or to its right when they meet head on.
+            private static bool TryGetPassing(FixedVector2 velocity, FixedVector2 otherVelocity, ref FixedVector2 direction)
+            {
+                if (FixedMath.Dot(velocity, otherVelocity).rawValue >= 0)
+                {
+                    return false;
+                }
+                var heading = FixedMath.NormalizeSafe(velocity);
+                if (heading.x.rawValue == 0 && heading.y.rawValue == 0)
+                {
+                    return false;
+                }
+                var sideways = direction - heading * FixedMath.Dot(direction, heading);
+                var length = FixedMath.Length(sideways);
+                // Right of the heading: positive turns go from X towards Z, to the left of an agent facing X.
+                direction = length.rawValue > MIN_SIDEWAYS_RAW ? sideways / length : -FixedMath.Perpendicular(heading);
+                return true;
             }
 
             private static int GetShare(bool isWalking, bool isOtherWalking)
@@ -231,53 +253,16 @@ namespace Pragma.Lockstep.Navigation
                 }
             }
 
-            // The pushed position, or only its walkable part: the whole push, else along X, else along Z. An agent that
-            // already stands on a blocked cell is pushed freely: the path system walks it out.
-            private bool TryMove(FixedVector3 from, FixedVector2 push, out FixedVector3 position)
+            // The pushed position, or only the part of it the body fits in (LockstepNavigation.TryStep). An agent that
+            // already stands on a cell too narrow for it is pushed freely: the path system walks it out.
+            private bool TryMove(FixedVector3 from, FixedVector2 push, int clearance, out FixedVector3 position)
             {
+                if (hasGrid)
+                {
+                    return LockstepNavigation.TryStep(grid, cells, from, push, clearance, out position);
+                }
                 position = new FixedVector3(from.x + push.x, from.y, from.z + push.y);
-                if (!hasGrid || !LockstepNavigation.IsWalkable(grid, cells, from) || LockstepNavigation.IsWalkable(grid, cells, position))
-                {
-                    return true;
-                }
-                position = new FixedVector3(from.x + push.x, from.y, from.z);
-                if (push.x.rawValue != 0 && LockstepNavigation.IsWalkable(grid, cells, position))
-                {
-                    return true;
-                }
-                position = new FixedVector3(from.x, from.y, from.z + push.y);
-                return push.y.rawValue != 0 && LockstepNavigation.IsWalkable(grid, cells, position);
-            }
-
-            private static long Key(long x, long z) => (x << 32) ^ (z & 0xFFFFFFFFL);
-
-            private static int LowerBound(NativeList<HashedAgent> hashed, long key)
-            {
-                var low = 0;
-                var high = hashed.Length;
-                while (low < high)
-                {
-                    var middle = (low + high) >> 1;
-                    if (hashed[middle].cell < key)
-                    {
-                        low = middle + 1;
-                    }
-                    else
-                    {
-                        high = middle;
-                    }
-                }
-                return low;
-            }
-
-            private static long FloorDivide(long value, long divisor)
-            {
-                var quotient = value / divisor;
-                if (value % divisor != 0 && value < 0)
-                {
-                    quotient--;
-                }
-                return quotient;
+                return true;
             }
         }
     }

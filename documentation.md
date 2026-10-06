@@ -270,17 +270,40 @@ These came up while building on Entities; neither reference package deals with t
     covers it. Obstacles are entities; the rectangle each one stamped is kept in a cleanup component, which is how a
     destroyed building releases its cells. The search is A* with integer costs and a heap with a strict total order;
     line of sight for string pulling compares cross products of raw fixed-point values, so it is exact, and a segment
-    through a cell corner counts both cells beside it. Paths are planned in a parallel job: each depends only on the
-    grid and its own agent, so the thread count cannot change a result. Walking agents re-check their remaining
+    through a cell corner counts both cells beside it. Paths are planned in parallel jobs: each depends only on the
+    grid, the standing agents, its own agent and its group, taken in query order, so the thread count cannot change a
+    result. Walking agents re-check their remaining
     segments when the grid version changes and plan again only when they are blocked. A grid was chosen over a
     fixed-point navmesh because it is simple to keep exact, cheap to change at run time (buildings) and easy to hash;
-    a navmesh with a funnel algorithm would give smoother paths on large open maps. Agents keep apart by separation,
-    not by avoidance: after they walked, overlapping agents are pushed apart by half of the overlap per tick, a walking
-    agent taking three quarters of it from a standing one so that units holding a place are not swept along. Each
-    push is a function of the pair alone and the pushes of an agent are summed in integer math, so the result does
-    not depend on the visiting order; positions are read from a copy taken before any agent moves. Predictive
-    avoidance (RVO) would steer agents around each other before they touch, at the cost of velocity state and an
-    iteration whose result depends on its order. The ground is part of the grid: fixed-point heights at the cell
+    a navmesh with a funnel algorithm would give smoother paths on large open maps. Agents keep apart by separation:
+    after they walked, overlapping agents are pushed apart by half of the overlap per tick, a walking agent taking
+    three quarters of it from a standing one so that units holding a place are not swept along. Each push is a
+    function of the pair alone and the pushes of an agent are summed in integer math, so the result does not depend on
+    the visiting order; positions are read from a copy taken before any agent moves. Optional local avoidance steers
+    walking agents around each other before they touch, by velocity sampling rather than ORCA: an agent scores a fixed
+    list of velocities around its path velocity by how soon each would touch its nearest neighbours (reciprocal for
+    walking ones) and walks the cheapest. Sampling needs no linear program, whose fixed-point corner cases are hard to
+    keep robust, it takes walls into account by skipping steps onto blocked cells, and its result depends only on a
+    copy of the positions and last velocities, so agents pick in parallel. The threat of a neighbour is capped below
+    the cost of turning back, so agents never deadlock waiting for each other: where they cannot go around, they push
+    through, which is what separation already resolves. Avoidance is a singleton a game adds or leaves out; without it
+    agents walk exactly as before. Two walkers going opposite ways are pushed only sideways: where there is no room to
+    step aside they overlap and pass, a deliberate exception to keeping apart, because a passage held shut by two
+    soldiers shoving each other is worse than a moment of overlap. With avoidance, paths also go around crowds of
+    standing agents, as a cell cost read from the agents of the tick (walkers are left out: they move on, and counting
+    them would make paths flap as crowds move).
+    Agents of different sizes share one grid. Obstacles grow by one agent radius, and each cell keeps its clearance,
+    the Chebyshev distance to the nearest blocked cell, computed in two passes whenever a cell changes; a larger body
+    needs as much clearance as its radius exceeds the agent radius, in cells, rounded to the nearest. One grid with a
+    clearance per cell was chosen over a grid per size class: one stamp, one hash, and every query takes the size as a
+    number. Rounding to the nearest keeps bodies a little larger than the agent radius (cavalry) on the infantry's cells,
+    as the cells only approximate obstacles anyway.
+    Agents sent together share one search: the requests of a tick are grouped by goal cell and clearance, and a group
+    searches once from its goal back to all of its agents, with the octile distance to the box around them as the
+    heuristic, which keeps it consistent, so every chain is a shortest one. Each agent string-pulls its own chain and
+    goes on to its own destination; one the chain does not bring there plans alone. This is the part of a flow field an
+    RTS needs, a search shared by an order, without keeping a field per destination as state: the chains live for one
+    tick. The ground is part of the grid: fixed-point heights at the cell
     corners, baked from a terrain, so a unit's Y is simulation state every client computes alike (bilinear inside a
     cell) instead of something each renderer guesses. Agents walk on the XZ plane and take the ground's height after
     every step and push; slopes steeper than a limit block their cells for good when the cells are built, the way the
@@ -345,7 +368,7 @@ These came up while building on Entities; neither reference package deals with t
   re-simulated when frames arrive.
 - **Snapshot late join**: serialize the confirmed world for joiners of long matches.
 - **Deterministic physics** on `FixedPoint`.
-- **Navigation**: predictive avoidance between agents (they only separate once they overlap), flow fields for large
-  groups, cell costs, paths for several agent sizes.
+- **Navigation**: cell costs of terrain kinds, queues in front of narrow passages, paths that plan around walking
+  crowds.
 - **Input compression** for large input structs.
 - **Diff tooling**: a window that compares per-component hashes and entity dumps of two clients side by side.

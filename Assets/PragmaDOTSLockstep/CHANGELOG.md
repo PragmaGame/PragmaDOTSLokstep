@@ -8,6 +8,32 @@ and this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Bodies larger than the grid's agent radius (`Pragma.Lockstep.Navigation`): `LockstepNavCell.clearance`, the rings of
+  free cells around a cell, kept by `LockstepNavObstacleSystem` (`LockstepNavigation.UpdateClearance`), and
+  `LockstepNavigation.GetClearance`, how much of it a body of a radius needs. Paths, line of sight, steps, pushes and
+  stepping out of obstacles keep an agent to the cells with room for its body (`IsPassable`, `TryFindNearestPassable`,
+  `HasLineOfSight` and `TryStep` with a clearance); `LockstepNavPathMap` is the grid as one agent plans on it.
+- One search for a group of agents sent together: `LockstepNavAgent.SetDestination(destination, groupGoal)` and
+  `groupGoal`. `LockstepNavPathSystem` groups the paths of a tick by goal cell and clearance, searches once per group
+  back from its goal to all of its agents (`LockstepPathfinder.SearchGroup`, `GetChain`) and gives each agent its own
+  path along its chain to its own destination (`FollowChain`); groups and paths are planned in parallel jobs, a path
+  per thread. An order moving 1200 agents in eight armies plans in about 8 ms instead of 25 ms.
+- Crowds cost paths: with avoidance, a standing agent makes the cells its body covers cost
+  `LockstepNavAvoidance.crowdCost` cells more, so paths go around idle crowds when the way around is shorter.
+- `LockstepNavAgent.pace`: an agent walks no faster than the pace of the group it walks with; `WalkSpeed` is the speed
+  it walks at. `LockstepNavAgent.Replan` plans the path again keeping the destination and the group.
+- `NavigationPerformanceTests`, run by name: navigation of 1200 agents on a 256 by 256 grid.
+- Local avoidance (`Pragma.Lockstep.Navigation`): while the world has a `LockstepNavAvoidance` (time horizon, neighbour
+  distance, how many neighbours; `LockstepNavAvoidanceAuthoring` bakes it, `Default` suits units walking a few units
+  per second), `LockstepNavAvoidanceSystem` picks the velocity of every walking agent with a `LockstepNavVelocity` and
+  a radius in a parallel Burst job: sampled around the velocity that walks its path and scored by how soon it would
+  touch its nearest neighbours (found in a spatial hash; walking ones take half of the avoiding), capped so agents
+  never wait or turn back and push through crowds they cannot go around. `LockstepNavMoveSystem` walks that velocity,
+  slides along walls and plans the path again when a wall hides the next waypoint. Without the singleton agents walk
+  exactly as before. `LockstepNavVelocity.value` records what an agent walked on its last step;
+  `LockstepNavAgentAuthoring` bakes the component.
+- `LockstepNavigation.TryStep`: where a step may end without entering a blocked cell (whole, along X, or along Z);
+  pushes of `LockstepNavSeparationSystem` use it.
 - Vision (`Pragma.Lockstep.Vision`): what every player slot sees, as simulation state. `LockstepVisionGrid` (a grid of
   cells on the XZ plane, one plane of `LockstepVisionCell`s per slot of the session, `isRevealed` to show everything)
   is filled again on every tick by `LockstepVisionSystem`, last in the tick, from the `LockstepVisionSource`s (a radius
@@ -88,6 +114,12 @@ and this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bytes without decoding them.
 - Agents walk on the XZ plane: their speed is over it, and their Y is the ground under them, or stays as it is on a grid
   without heights. They no longer climb or sink towards the Y of their destination.
+- `LockstepNavSeparationSystem` pushes two agents walking opposite ways only sideways, each to its own side: head-on
+  walkers step aside and pass, and in a passage one body wide they squeeze past each other instead of blocking it.
+- String pulling finds the farthest cell a corner sees by doubling the reach and halving the gap: a few line tests per
+  corner instead of one per cell.
+- `LockstepNavPathSystem` checks walking paths, collects the requests, searches the groups and plans the paths in a
+  chain of jobs; a path blocked by a new obstacle is planned again on the same tick, with its group.
 
 ### Fixed
 

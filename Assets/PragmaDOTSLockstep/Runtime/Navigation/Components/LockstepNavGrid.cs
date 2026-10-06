@@ -26,8 +26,9 @@ namespace Pragma.Lockstep.Navigation
         /// <summary>Number of cells along world Z.</summary>
         public int height;
         /// <summary>
-        /// Radius of the agents: an obstacle blocks every cell whose centre is closer to it than this, so paths keep the
-        /// centres of agents that far from obstacles.
+        /// Radius of the common agents: an obstacle blocks every cell whose centre is closer to it than this, so paths keep
+        /// the centres of agents that far from obstacles. Larger bodies keep to cells with more clearance
+        /// (<see cref="LockstepNavigation.GetClearance"/>).
         /// </summary>
         public FixedPoint agentRadius;
         /// <summary>

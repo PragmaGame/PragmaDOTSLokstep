@@ -29,7 +29,8 @@ namespace Pragma.Lockstep.Tests
             {
                 foreach (var (agent, target) in SystemAPI.Query<RefRW<LockstepNavAgent>, RefRO<TestNavigationTarget>>())
                 {
-                    agent.ValueRW.SetDestination(tick == SEND_TICK ? target.ValueRO.there : target.ValueRO.back);
+                    var isThere = tick == SEND_TICK;
+                    agent.ValueRW.SetDestination(isThere ? target.ValueRO.there : target.ValueRO.back, isThere ? target.ValueRO.thereGoal : target.ValueRO.backGoal);
                 }
             }
 

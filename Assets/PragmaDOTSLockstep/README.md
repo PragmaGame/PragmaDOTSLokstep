@@ -72,7 +72,9 @@ It is a poor fit for:
   tells everybody which client diverged. A per-component breakdown shows what diverged.
 - **Navigation.** A walkability grid with ground heights baked from a terrain (steep slopes blocked), obstacles that
   block it while their entity exists, A* with string pulling in integer math and agents that walk the paths on the
-  ground in `FixedPoint`, planning again when obstacles change.
+  ground in `FixedPoint`, planning again when obstacles change. Large bodies keep to cells with room for them, an order
+  that moves an army costs one search, and with avoidance agents steer around each other, go around idle crowds and
+  pass each other in narrow passages.
 - **Vision.** What every player slot sees, stamped on a grid from vision sources on every tick: state of the simulation,
   the same on every client, for the fog of war and for rules that need a visible target.
 - **Stats.** Attributes with flat, additive and multiplicative modifiers (timed or lasting until their source removes
@@ -725,17 +727,22 @@ The editor converts once and stores raw values.
 ## Navigation
 
 `Pragma.Lockstep.Navigation` walks units around obstacles inside the simulation: a walkability grid on the XZ plane,
-with optional ground heights, A* in integer math, string pulling, and agents that follow the paths in `FixedPoint`. NavMesh cannot drive gameplay in
-lockstep: it works in floats, is built per platform and answers differently on different machines.
+with optional ground heights, A* in integer math, string pulling, agents that follow the paths in `FixedPoint`, bodies
+larger than the grid's agent radius kept out of gaps they do not fit through, one search for a group of agents sent
+together, and optional avoidance that steers walking agents around each other and paths around crowds. NavMesh cannot
+drive gameplay in lockstep: it works in floats, is built per platform and answers differently on different machines.
 
 | Type | What it is |
 |---|---|
-| `LockstepNavGrid` | Singleton: origin, cell size, width, height, agent radius, the steepest walkable slope (`maxSlope`, rise over run) and a version that changes with the cells. The cells are the `LockstepNavCell` buffer of the same entity: the number of obstacles over each cell |
+| `LockstepNavGrid` | Singleton: origin, cell size, width, height, agent radius, the steepest walkable slope (`maxSlope`, rise over run) and a version that changes with the cells. The cells are the `LockstepNavCell` buffer of the same entity: the number of obstacles over each cell and its clearance, how many rings of free cells surround it |
 | `LockstepNavHeight` | Optional buffer on the grid entity: world Y of the ground at every cell corner (`CornerCount`, row by row along X). Agents walk on it, and cells steeper than `maxSlope` are blocked for good |
 | `LockstepNavObstacle` | A rectangle (center, size) in the space of the entity's `LockstepTransform` (yaw and uniform scale apply), or in world space without one. It blocks every cell whose centre is within the agent radius of it |
-| `LockstepNavAgent` | Speed, angular speed, stopping distance and body radius of a unit that walks, its destination and status (`Idle`, `Requested`, `Moving`, `Arrived`). The path is its `LockstepNavWaypoint` buffer |
-| `LockstepNavSystemGroup` | Inside `LockstepSimulationSystemGroup`: `LockstepNavObstacleSystem` stamps obstacles, `LockstepNavPathSystem` plans and checks paths in parallel, `LockstepNavMoveSystem` walks agents, `LockstepNavSeparationSystem` pushes overlapping agents apart |
-| `LockstepPathfinder`, `LockstepNavigation` | The search and the grid queries (`IsWalkable`, `HasLineOfSight`, `TryFindNearestWalkable`, `IsClear`, `Covers`, `GetCoverage`, `Stamp`) and the ground queries (`HasHeights`, `GetHeight`, `ToGround`, `IsSteep`) for systems of your own |
+| `LockstepNavAgent` | Speed, pace, angular speed, stopping distance and body radius of a unit that walks, its destination, the goal of the group it was sent with (`groupGoal`) and status (`Idle`, `Requested`, `Moving`, `Arrived`). The path is its `LockstepNavWaypoint` buffer |
+| `LockstepNavVelocity` | What an agent walked on its last step (`value`) and what avoidance picked for this one (`desired`), in units per second on X and Z. An agent with it and a radius takes part in avoidance |
+| `LockstepNavAvoidance` | Singleton that turns avoidance on: how many seconds ahead agents look (`timeHorizon`), how far (`neighbourDistance`) and how many neighbours they avoid (`maxNeighbours`), what a standing agent costs a path (`crowdCost`); `Default`. Without it agents plan and walk their paths as if they were alone |
+| `LockstepNavSystemGroup` | Inside `LockstepSimulationSystemGroup`: `LockstepNavObstacleSystem` stamps obstacles and keeps the clearance of the cells, `LockstepNavPathSystem` plans and checks paths in parallel, `LockstepNavAvoidanceSystem` picks the velocities of avoiding agents in parallel, `LockstepNavMoveSystem` walks agents, `LockstepNavSeparationSystem` pushes overlapping agents apart |
+| `LockstepPathfinder`, `LockstepNavPathMap` | The search: one agent's path (`FindPath`), the search of a group (`SearchGroup`, `GetChain`, `FollowChain`), and the grid as one agent plans on it (its clearance, the crowds and what they cost) |
+| `LockstepNavigation` | The grid queries (`IsWalkable`, `IsPassable`, `GetClearance`, `UpdateClearance`, `HasLineOfSight`, `TryFindNearestWalkable`, `TryFindNearestPassable`, `TryStep`, `IsClear`, `Covers`, `GetCoverage`, `Stamp`) and the ground queries (`HasHeights`, `GetHeight`, `ToGround`, `IsSteep`) for systems of your own |
 
 ### Setting it up
 
@@ -751,9 +758,14 @@ lockstep: it works in floats, is built per platform and answers differently on d
    `LockstepSceneEntityAuthoring`: the pose is baked, non-uniform scale included. Scene entities are copied whole into
    the simulation, so keep renderers off the obstacle's GameObject (a child works).
 3. Give units a `LockstepNavAgentAuthoring` (next to a `LockstepTransformAuthoring`), with the radius of their body if
-   they should not stand inside each other.
-4. Set destinations from a system that updates before `LockstepNavSystemGroup`; the agent plans its path and takes its
-   first step on the same tick:
+   they should not stand inside each other. It bakes a `LockstepNavVelocity` too, so they can avoid each other. Set the
+   grid's agent radius to that of the common units; larger bodies (vehicles) keep to cells with room for them.
+4. For units that steer around each other, add a `LockstepNavAvoidanceAuthoring` to the subscene of the map, or add the
+   `LockstepNavAvoidance` singleton from settings of your own (a match option) before tick 0. Remove it to turn
+   avoidance off: agents then walk exactly as without it.
+5. Set destinations from a system that updates before `LockstepNavSystemGroup`; the agent plans its path and takes its
+   first step on the same tick. Send the agents of one order with `SetDestination(destination, groupGoal)`, each to its
+   own place around the point of the order, so that the whole order costs one search:
 
 ```csharp
 [UpdateInGroup(typeof(LockstepSimulationSystemGroup))]
@@ -770,7 +782,8 @@ public partial struct MoveOrderSystem : ISystem
 }
 ```
 
-`LockstepNavAgent.Stop()` stops an agent where it stands.
+`LockstepNavAgent.Stop()` stops an agent where it stands. `LockstepNavAgent.pace` slows an agent down to the pace of a
+group it walks with, such as a squad that keeps together at the speed of its slowest member; zero walks at its own speed.
 
 To check where a building may go, build its footprint with `LockstepNavObstacleFootprint.Create(obstacle, transform)`
 and ask `LockstepNavigation.IsClear(grid, cells, footprint)`: true when every cell it would block is inside the grid and
@@ -781,8 +794,23 @@ walkable. Footprints that are not in the grid yet (two buildings placed on one t
 
 - **Paths.** A* over the eight neighbours of a cell with integer costs (10 straight, 14 diagonal) and an octile
   heuristic. A diagonal step needs both cells beside it free, so paths never cut a blocked corner. String pulling keeps
-  a corner only where the straight line is blocked. Line of sight is traced exactly through the cell borders, and a
-  segment through a cell corner counts both cells beside it.
+  a corner only where the straight line is blocked; from each corner it finds the farthest cell it sees by doubling
+  the reach and halving the gap. Line of sight is traced exactly through the cell borders, and a segment through a cell
+  corner counts both cells beside it.
+- **Bodies.** Obstacles block the cells within the grid's agent radius, which fits the common units. A larger body
+  needs clearance: `LockstepNavigation.GetClearance` gives one more ring of free cells around the cell for every cell
+  size the radius exceeds the agent radius, rounded to the nearest. The cells keep their clearance (the distance in
+  rings to the nearest blocked cell or the edge of the grid, `UpdateClearance`), and paths, line of sight, steps,
+  pushes and stepping out of obstacles all keep a large body to the cells with room for it: a vehicle goes round
+  through a wide gap where infantry squeeze through a narrow one. A large agent that ends up on a cell too narrow for it
+  only has to keep to walkable cells on its way out. A weapon that strikes from the centre of a large body needs a
+  reach longer than the body and the clearance around it.
+- **Groups.** The paths planned on one tick are grouped by the cell of their agent's `groupGoal` and the clearance of
+  its body. A group of two or more searches once, back from its goal to all of its agents at once (A* with the octile
+  distance to the box around them as the heuristic, so every chain of cells is a shortest one), and each agent follows
+  its own chain of cells, then goes on to its own destination; corners its destination does not need are left out. An
+  agent the chain does not bring to its destination (a wall between the goal and it) plans alone. Agents sent alone
+  (`SetDestination(destination)`) group only with agents sent to the same cell. Paths planned again keep their group.
 - **Blocked and unreachable destinations.** A destination in a blocked cell moves to the nearest free cell. When the
   destination cannot be reached at all, the path ends at the reachable cell closest to it and `isPathPartial` is set.
   An agent standing in an obstacle first walks to the nearest free cell. An agent standing still on a cell that becomes
@@ -792,38 +820,71 @@ walkable. Footprints that are not in the grid yet (two buildings placed on one t
   updates the cells on the next navigation update and changes `LockstepNavGrid.version`; walking agents then check the
   rest of their path and plan again when it is blocked. Partial paths are planned again on every change, since the
   destination may have opened up.
-- **Walking.** Agents walk on the XZ plane at `speed`, keep it through corners, turn to face where they walk
-  (`angularSpeed` radians per second; zero turns at once), stop `stoppingDistance` before the end of the path and
-  become `Arrived`. With ground heights, the Y of a walking or pushed agent is the ground under it (bilinear inside a
-  cell); without them it stays as it is: the Y of the destination is never walked to. Without a grid agents walk
-  straight to the destination.
+- **Walking.** Agents walk on the XZ plane at `speed`, or at their `pace` when that is slower, keep it through
+  corners, turn to face where they walk (`angularSpeed` radians per second; zero turns at once), stop
+  `stoppingDistance` before the end of the path and become `Arrived`. With ground heights, the Y of a walking or pushed
+  agent is the ground under it (bilinear inside a cell); without them it stays as it is: the Y of the destination is
+  never walked to. Without a grid agents walk straight to the destination.
 - **Ground.** `LockstepNavigation.GetHeight` is the height of the ground at any X and Z (the edge of the grid beyond
   it), `ToGround` puts a position on it: use them for whatever you place on the map (spawned units, buildings). A cell
   two neighbouring corners of which differ by more than `maxSlope` times the cell size is steep: the grid blocks it with
   one permanent blocker when it builds its cells, so paths, `IsClear` and stepping out of obstacles all treat steep
   ground as an obstacle. Heights are static: they are read when the cells are built.
+- **Avoiding.** With a `LockstepNavAvoidance` in the world, every walking agent with a `LockstepNavVelocity` and a
+  radius picks the velocity of its step before it walks: it tries the velocity that walks its path, the one it walked
+  last and the path velocity turned up to a right angle either way at full and half speed, and walks the cheapest. A
+  velocity costs its distance from the path velocity, an eighth of its distance from the last one (so agents do not
+  waver), and the threat of its nearest neighbours: none for a neighbour it would not touch within `timeHorizon`, more
+  the sooner it would. A walking neighbour is expected to keep its last velocity and to take half of the avoiding
+  (reciprocal velocity obstacles); a standing one is walked around. The threat is capped: walkers make way for each
+  other as far as a right angle, a standing agent is passed with an early small turn, and where every way is crowded
+  the agent walks on and shoulders its way through, so agents never turn back and never wait. Ties go to the earlier
+  velocity, right turns before left ones: two agents walking into each other both turn right and pass. Collisions
+  after the end of the path do not count, and agents standing at the end are shouldered aside. An avoiding agent never
+  steps onto a cell its body does not fit in (it slides along the wall, `LockstepNavigation.TryStep`), passes a corner
+  of its path when its body covers it, lands exactly on the end of its path, and plans its path again when it has
+  turned so far aside that a wall hides its next waypoint. Without the singleton, or without a radius, agents walk their
+  paths straight. `LockstepNavVelocity.value` is what the agent walked on its last step, avoidance or not.
+- **Crowds.** With avoidance, a path goes around agents standing in its way: every cell a standing agent's body, grown
+  by the grid's agent radius, covers costs `crowdCost` cells more to enter, and straight lines are drawn through
+  crowded cells only where the path itself crosses them. A walker goes around an idle squad when the way around is
+  shorter, and through it, shouldering it aside, when it is not. Walking agents cost nothing: they move on.
 - **Keeping apart.** After they walked, agents closer than the sum of their `radius` are pushed apart by half of the
   overlap per tick (an agent at most by its radius), so a crowd that met on one point spreads out over a few ticks
   instead of jumping. Two walking or two standing agents share the push equally; a walking agent takes three quarters
   of it from a standing one, so it slides past units that hold their place and still makes its way to a destination
-  one of them stands on. A push never ends on a blocked cell: it is cut to its walkable X or Z part, or dropped. Agents
-  with a zero radius take no part. Paths are not planned around other agents: a pushed agent walks on to its next
-  waypoint from where it stands, and agents sent to one point crowd around it.
+  one of them stands on. Two agents walking opposite ways (by their last steps) are only pushed sideways, each to its
+  own side: they step aside and pass, and in a passage too narrow to step aside in they squeeze past each other
+  instead of blocking it for good. A push never ends on a cell the body does not fit in: it is cut to its X or Z part,
+  or dropped. Agents with a zero radius take no part. A pushed agent walks on to its next waypoint from where it
+  stands, and agents sent to one point crowd around it.
 - **Determinism.** Integer and `FixedPoint` math only, a heap with a strict total order, and paths that depend only on
-  the grid and their own agent, so planning in parallel gives the same result on any number of threads. Cells count
-  obstacles, so the order obstacles are stamped in does not matter. Burst and Mono find bit-identical paths. An
-  agent's push is a sum of pair pushes in exact integer math, so the order agents are visited in does not matter
+  the grid, the standing agents, their own agent and the agents of their group, so planning in parallel gives the same
+  result on any number of threads; requests and groups are taken in the order of the query, which every client shares.
+  Cells count obstacles, so the order obstacles are stamped in does not matter. Burst and Mono find bit-identical paths.
+  An agent's push is a sum of pair pushes in exact integer math, so the order agents are visited in does not matter
   either; agents on the very same point split along directions picked by their order in the query, which every client
-  shares.
+  shares. Avoiding agents read the positions and last velocities of all agents from a copy taken before any of them
+  picked, try velocities in a fixed order and find their neighbours in a spatial hash sorted by cell and query index, so
+  they pick in parallel with the same result on any number of threads.
 
 ### Cost
 
 A search visits each cell at most once and stops at the destination. Its cost grows with the area between start and
-destination; an unreachable destination makes it visit the whole reachable area. Paths are planned in a parallel job
-with one scratch buffer per chunk, and walking agents only re-check their remaining segments when the grid changes.
-Keeping apart sorts the agents with a radius into a spatial hash once per tick and compares each with the agents of the
-nine hash cells around it.
-Pick the cell size from the narrowest gap units must pass: about the agent radius is a good start.
+destination; an unreachable destination makes it visit the whole reachable area. The searches of a tick run in
+parallel jobs, a group per thread and then a path per thread, each with the scratch memory of its job thread, and
+walking agents only re-check their remaining segments when the grid changes. The clearance of the cells is computed
+again, in two passes over the grid, whenever an obstacle changes. Keeping apart sorts the agents with a radius into a
+spatial hash once per tick and compares each with the agents of the nine hash cells around it. Avoidance does the same
+with cells of the neighbour distance, then, in a parallel Burst job, scores about twenty velocities against at most
+`maxNeighbours` neighbours per walking agent: a larger neighbour distance finds more neighbours in a crowd and costs more.
+
+Measured on a 256 by 256 grid of 1 m cells with buildings and a wall with gaps, 1200 agents in eight armies of 150
+(`NavigationPerformanceTests`, run by name): a path across the map costs about 0.25 ms alone, the search of a whole
+army about 2 ms and a soldier's path along it under 0.01 ms; the tick in which all eight armies get their orders takes
+about 8 ms (about 25 ms with every soldier sent alone), and a tick of 1200 agents walking with avoidance about 2 ms.
+Send the agents of an order as a group. Pick the cell size from the narrowest gap units must pass: about the agent
+radius is a good start.
 
 ## Vision
 
@@ -1693,8 +1754,8 @@ Copy-Item -Recurse -Force (Resolve-Path "Library/PackageCache/com.pragma.dotsloc
 - **Late join from a snapshot.** Joining re-simulates the match from tick 0, which grows with the match length.
 - **Deterministic physics.** Use `FixedPoint` math for collisions (the sample does). Unity Physics is not deterministic
   across platforms.
-- **Local avoidance and richer navigation.** Agents are pushed apart but do not plan around each other. One grid per
-  world with one agent radius, no cell costs, and no flow fields for large groups.
+- **Richer navigation.** One grid per world; no cell costs of terrain kinds, no queues in front of passages, and paths
+  that go around walking agents only locally.
 - **Line of sight.** Vision is a radius on the XZ plane: neither the ground nor obstacles block it.
 
 ## License
