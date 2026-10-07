@@ -15,7 +15,8 @@ server never simulates, and the bandwidth depends on the number of players, not 
 - Fixed-point math (`FixedPoint`, `FixedVector2`, `FixedVector3`, `FixedQuaternion`, `FixedMath`, `FixedRandom`), bit-identical in Mono, IL2CPP and Burst.
 - Per-tick input structs, never-dropped commands with data of any length, players as entities.
 - A server that orders input and never stalls, adaptive input timing, a jitter-aware playout buffer.
-- Desync detection by majority vote with a per-component breakdown, replays, late join, offline mode.
+- Desync detection by majority vote with a per-component breakdown, replays (watched through ordinary clients, at any
+  speed, from any player's view), late join, offline mode.
 - Netcode for Entities integration (host, dedicated server, thin clients) and a transport-agnostic core.
 - Deterministic navigation: a walkability grid with ground heights baked from a terrain (steep slopes blocked), obstacles,
   A* with string pulling in integer math, agents that walk on the ground and re-plan when obstacles change.

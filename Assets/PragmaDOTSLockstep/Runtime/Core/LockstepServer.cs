@@ -18,7 +18,7 @@ namespace Pragma.Lockstep
     /// <para>The class is transport-agnostic: feed it with <see cref="OnPacket"/> and connection events, call
     /// <see cref="Update"/> regularly, and it sends through the <see cref="ILockstepTransport"/>.</para>
     /// </remarks>
-    public sealed unsafe class LockstepServer : IDisposable
+    public sealed unsafe class LockstepServer : ILockstepServerEndpoint, IDisposable
     {
         private sealed class Slot
         {

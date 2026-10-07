@@ -8,6 +8,19 @@ and this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Watching replays through clients: `LockstepReplayHost` plays a `LockstepReplay` to ordinary `LockstepClient`s in the
+  server's place — each connection joins as the slot it watches (`Watch`), recorded frames are released on a playback
+  clock (`Speed`, `IsPaused`, `Position`), the session ends after the last frame, client input is ignored and client
+  checksums are compared with the recorded ones (`FirstMismatchTick`, `MismatchEvent`, a desync on the client).
+  `LockstepReplaySession` runs a host and one client per watching world over a loopback network and registers the
+  clients in `LockstepWorlds`, so the presentation shows a replay as it shows a match.
+- `LockstepClient.PlaybackSpeed`: the playout and the arrival of frames are measured in real time scaled by it, so a
+  client follows a replay at any speed and holds its picture at 0.
+- `LockstepReplay.Players` (`LockstepReplaySlot`: slot, join and leave ticks, join data) and
+  `LockstepReplay.DurationSeconds`, read from the frames.
+- `ILockstepServerEndpoint`: the server side as a transport sees it, implemented by `LockstepServer` and
+  `LockstepReplayHost`; `LockstepLoopbackNetwork.AttachServer` takes it.
+
 - Bodies larger than the grid's agent radius (`Pragma.Lockstep.Navigation`): `LockstepNavCell.clearance`, the rings of
   free cells around a cell, kept by `LockstepNavObstacleSystem` (`LockstepNavigation.UpdateClearance`), and
   `LockstepNavigation.GetClearance`, how much of it a body of a radius needs. Paths, line of sight, steps, pushes and

@@ -188,9 +188,27 @@ using (var player = new LockstepReplayPlayer(replay, options))
 }
 ```
 
-For playback in real time call `player.Update(deltaTime)` each frame and present `player.Simulation.World` with
-`player.InterpolationAlpha` (`Speed` scales playback). Pass the same `LockstepSimulationOptions` the game uses when the
-simulation needs the prefab registry. Replays need the same simulation build.
+`replay.Players` (slot, join and leave ticks, join data) and `replay.DurationSeconds` describe a replay without
+simulating it.
+
+To watch a replay with the game's presentation, play it to ordinary clients:
+
+```csharp
+var session = new LockstepReplaySession(LockstepReplay.Read(bytes));   // owns the replay
+session.Watch(clientWorld, slot, clientSettings, LockstepClientWorldUtility.CreateSimulationOptions(clientWorld, true));
+session.Speed = 2f; session.IsPaused = false;                           // host and clients together
+session.Update(Time.unscaledTimeAsDouble);                              // every frame; Dispose unregisters
+```
+
+`LockstepReplayHost` takes the server's place: each connection joins as the slot it watches (`Watch(connectionId, slot)`
+before the join; none means `InvalidRequest`), frames come on the playback clock, the session ends after the last frame,
+client input is ignored, and checksums that differ from the recording raise `MismatchEvent` and a desync on the client.
+Clients follow the pace through `LockstepClient.PlaybackSpeed`. Several worlds can watch different slots at once.
+
+For checks without presentation, `LockstepReplayPlayer` simulates directly: `player.Update(deltaTime)` each frame with
+`player.Simulation.World` and `player.InterpolationAlpha` (`Speed` scales playback), or `SimulateToEnd()`. Pass the same
+`LockstepSimulationOptions` the game uses when the simulation needs the prefab registry. Replays need the same
+simulation build.
 
 ## Troubleshooting
 

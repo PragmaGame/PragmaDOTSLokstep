@@ -1178,6 +1178,7 @@ Lobby ──(MinPlayersToStart reached, RequestStart or StartGame)──► Runn
 | `Simulation` | The `LockstepSimulation` (null before the start and on clients that do not simulate) |
 | `ConfirmedTicks`, `SimulatedTicks`, `BufferedTicks` | Frame progress |
 | `InterpolationAlpha` | Blend factor for rendering, in `[0, 1]` |
+| `PlaybackSpeed` | How fast the playout runs: 1 is real time, 0 holds the picture (replays) |
 | `RoundTripTime`, `JitterTicks` | Network measurements |
 | `IsDesynced`, `DesyncTick`, `LocalChecksums` | Desync state |
 | `StartedEvent`, `DesyncedEvent`, `EndedEvent`, `RejectedEvent` | Events |
@@ -1191,6 +1192,16 @@ Lobby ──(MinPlayersToStart reached, RequestStart or StartGame)──► Runn
 | `VerifiedChecksumCount`, `LateInputCount` | Diagnostics |
 | `DesyncDetectedEvent`, `ProtocolViolationEvent` | Events |
 | `StartGame`, `EndGame`, `ExportReplay`, `TryGetPlayerSlot`, `IsSlotInUse` | Actions and queries |
+
+| `LockstepReplayHost` | |
+|---|---|
+| `Replay`, `FrameCount` | The recording it plays |
+| `Position`, `ReleasedTicks`, `IsFinished` | The playback clock in ticks, frames released to the clients, whether all are out |
+| `Speed`, `IsPaused` | Pace of the clock |
+| `FirstMismatchTick`, `MismatchEvent` | A client's state differed from the recording |
+| `Watch`, `Update` | Assign a connection the slot it watches; advance the clock and stream frames |
+
+Both servers implement `ILockstepServerEndpoint` — the connection events and packets a transport feeds.
 
 ## Presentation
 
@@ -1554,10 +1565,47 @@ using (var player = new LockstepReplayPlayer(replay))
 }
 ```
 
-For watching a replay, call `player.Update(deltaTime)` every frame (`Speed` scales playback) and present
-`player.Simulation.World` with `player.InterpolationAlpha`. When the simulation instantiates registry prefabs, create
-the player with the options the game uses: `new LockstepReplayPlayer(replay,
-LockstepClientWorldUtility.CreateSimulationOptions(presentationWorld, false))`.
+`replay.Players` lists who played — slot, the ticks the player entered and left, its join data — and
+`replay.DurationSeconds` how long the match lasted; both come from the frames, so a replay list can show them without
+simulating anything.
+
+### Watching a replay
+
+To show a replay the way the game shows a match, play it to ordinary clients: `LockstepReplayHost` takes the server's
+place, accepts each connection as the player it watches and releases the recorded frames on a playback clock. The
+presentation then finds the replay through `LockstepWorlds.TryGetClient` like any session — views, interpolation,
+whatever the game reads from `LocalSlot`. `LockstepReplaySession` wires it up for client worlds:
+
+```csharp
+var session = new LockstepReplaySession(LockstepReplay.Read(bytes)); // owns the replay
+foreach (var player in session.Replay.Players)
+{
+    var world = ClientServerBootstrap.CreateClientWorld($"Replay {player.slot}");
+    session.Watch(world, player.slot, clientSettings, LockstepClientWorldUtility.CreateSimulationOptions(world, true));
+}
+
+session.Speed = 2f;          // the host and every watching client
+session.IsPaused = true;
+session.Update(Time.unscaledTimeAsDouble); // every frame
+session.Dispose();           // unregisters the clients
+```
+
+- Several worlds can watch different slots of one replay at one pace — switch between them to see the match through
+  each player's eyes.
+- The clock runs at `Speed` ticks per tick of real time and stands while `IsPaused`. The clients follow at the same
+  speed (`LockstepClient.PlaybackSpeed`), so playout stays smooth at any speed; a paused client holds its picture.
+- Once every frame is released the host ends the session (`EndedEvent`); the clients finish what they buffer.
+- Input and commands of the watching clients are ignored. Their checksums are compared with the recorded ones: a state
+  that differs — a replay of another build — raises `LockstepReplayHost.MismatchEvent` and reaches the client as a
+  desync (`IsDesynced`), once per connection.
+- Without the session, give the host a transport (`LockstepLoopbackNetwork` accepts any `ILockstepServerEndpoint`),
+  assign every connection its slot with `Watch(connectionId, slot)` before it joins, and call `Update` every frame. A
+  connection without a slot is rejected with `InvalidRequest`.
+
+For checks without a presentation, `LockstepReplayPlayer` simulates the frames directly: call `player.Update(deltaTime)`
+every frame (`Speed` scales playback) and present `player.Simulation.World` with `player.InterpolationAlpha`, or
+`SimulateToEnd()`. When the simulation instantiates registry prefabs, create the player with the options the game uses:
+`new LockstepReplayPlayer(replay, LockstepClientWorldUtility.CreateSimulationOptions(presentationWorld, false))`.
 
 A replay plays back only with the same build of the simulation: the same systems in the same order, and the same
 math.
@@ -1680,7 +1728,7 @@ that form and relays the bytes without decoding them.
 | Path | Contents |
 |---|---|
 | `Runtime/Mathematics` | `Pragma.Lockstep.Mathematics`: `FixedPoint`, `FixedVector2`, `FixedVector3`, `FixedQuaternion`, `FixedMath`, `FixedRandom` |
-| `Runtime/Core` | Protocol, `LockstepServer`, `LockstepClient`, settings, framing, frame history, replays, loopback network |
+| `Runtime/Core` | Protocol, `LockstepServer`, `LockstepClient`, settings, framing, frame history, replays and `LockstepReplayHost`, loopback network |
 | `Runtime/Simulation` | `LockstepSimulation`, the system group, command buffer systems, frame application, checksums, entity ids |
 | `Runtime/Simulation/Components` | The simulation components and singletons (`LockstepTime`, `LockstepPlayer`, `LockstepCommand`...) |
 | `Runtime/Transforms` | `LockstepTransform`, `LockstepTransformPrevious`, transform history |

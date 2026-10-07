@@ -96,7 +96,7 @@ ECV, the view layer of the author's own DawnOfWar project, adapted to lockstep.
 | Per-entity random streams in the state | `Ents.seeds` | `FixedRandom.CreateFromIndex(seed, lockstepEntityId.value)` stored in a component once the id is assigned |
 | Views separated from the simulation | Views module spawns from simulation data, frozen during re-simulation | `EntityViewManagerSystem` and `LockstepViewSystem` mirror simulation entities; nothing writes back |
 | "Who am I" only outside the tick | `GetActivePlayer()` asserts it is not in a tick | The simulation has no notion of a local player; `LocalSlot` exists only on the client object |
-| Replays as input logs | Event log and timeline window | Frame log (`LockstepFrameHistory`) and replay export from client, server and the debug window |
+| Replays as input logs | Event log and timeline window | Frame log (`LockstepFrameHistory`) and replay export from client, server and the debug window; `LockstepReplayHost` plays a replay to ordinary clients, so the presentation shows it like a match |
 
 ## Taken from ECV
 

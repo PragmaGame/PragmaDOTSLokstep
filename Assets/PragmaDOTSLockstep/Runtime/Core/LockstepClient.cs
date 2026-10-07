@@ -49,6 +49,9 @@ namespace Pragma.Lockstep
         private float _extraMargin;
         private double _ignoreFeedbackUntil;
         private double _playoutClock;
+        // Real time scaled by the playback speed: what the playout and the arrival of frames are measured in.
+        private double _playbackTime;
+        private float _playbackSpeed = 1f;
         private double _arrivalOffsetMean = double.NaN;
         private double _jitterSeconds;
         private bool _disposed;
@@ -91,6 +94,15 @@ namespace Pragma.Lockstep
         /// <summary>Checksums this client computed, by tick, in simulation order.</summary>
         public IReadOnlyList<KeyValuePair<int, ulong>> LocalChecksums => _localChecksums;
         public bool IsDesynced { get; private set; }
+        /// <summary>
+        /// How fast the playout runs: 1 is real time. A <see cref="LockstepReplayHost"/> streams frames faster, slower or
+        /// not at all, and the client follows at the same speed; 0 holds the simulation where it is. Never negative.
+        /// </summary>
+        public float PlaybackSpeed
+        {
+            get => _playbackSpeed;
+            set => _playbackSpeed = Math.Max(0f, value);
+        }
         /// <summary>First tick reported as desynced, or -1.</summary>
         public int DesyncTick { get; private set; } = -1;
 
@@ -234,6 +246,7 @@ namespace Pragma.Lockstep
             }
             var deltaTime = double.IsNaN(_lastUpdateTime) ? 0 : Math.Max(0, now - _lastUpdateTime);
             _lastUpdateTime = now;
+            _playbackTime += deltaTime * _playbackSpeed;
 
             if ((State == LockstepClientState.Joining || State == LockstepClientState.Lobby || State == LockstepClientState.Running) &&
                 now - _lastPingTime >= _settings.PingIntervalSeconds)
@@ -254,7 +267,7 @@ namespace Pragma.Lockstep
             if (Simulation != null && (State == LockstepClientState.Running || State == LockstepClientState.Ended) &&
                 !(_settings.StopOnDesync && IsDesynced))
             {
-                AdvanceSimulation(deltaTime);
+                AdvanceSimulation(deltaTime * _playbackSpeed);
             }
         }
 
@@ -373,8 +386,14 @@ namespace Pragma.Lockstep
             // Live frames come one or two at a time; bursts (late join) would only distort the jitter estimate.
             if (count > 0 && count <= 2)
             {
-                UpdateJitter(firstTick + count - 1, now);
+                UpdateJitter(firstTick + count - 1, GetPlaybackTime(now));
             }
+        }
+
+        /// <summary>The playback time of a moment between updates.</summary>
+        private double GetPlaybackTime(double now)
+        {
+            return double.IsNaN(_lastUpdateTime) ? _playbackTime : _playbackTime + Math.Max(0, now - _lastUpdateTime) * _playbackSpeed;
         }
 
         private void UpdateJitter(int tick, double now)

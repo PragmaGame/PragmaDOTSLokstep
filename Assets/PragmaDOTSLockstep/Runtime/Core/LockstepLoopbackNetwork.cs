@@ -5,8 +5,9 @@ using Unity.Collections.LowLevel.Unsafe;
 namespace Pragma.Lockstep
 {
     /// <summary>
-    /// In-process network between one <see cref="LockstepServer"/> and any number of <see cref="LockstepClient"/>s.
-    /// Used for offline play and for tests; latency and jitter are simulated, order per connection is preserved.
+    /// In-process network between one server endpoint (<see cref="LockstepServer"/>, <see cref="LockstepReplayHost"/>) and
+    /// any number of <see cref="LockstepClient"/>s. Used for offline play, replays and tests; latency and jitter are
+    /// simulated, order per connection is preserved.
     /// </summary>
     public sealed unsafe class LockstepLoopbackNetwork
     {
@@ -47,7 +48,7 @@ namespace Pragma.Lockstep
         private readonly Dictionary<long, double> _lastDelivery = new Dictionary<long, double>();
         private readonly Dictionary<int, LockstepClient> _clients = new Dictionary<int, LockstepClient>();
         private readonly Random _random;
-        private LockstepServer _server;
+        private ILockstepServerEndpoint _server;
         private long _sequence;
         private double _now;
 
@@ -67,7 +68,7 @@ namespace Pragma.Lockstep
 
         public int PacketsInFlight => _inFlight.Count;
 
-        public void AttachServer(LockstepServer server) => _server = server;
+        public void AttachServer(ILockstepServerEndpoint server) => _server = server;
 
         /// <summary>The transport to create a client with; <paramref name="connectionId"/> identifies it on the server.</summary>
         public ILockstepTransport CreateClientTransport(int connectionId) => new Endpoint(this, true, connectionId);
