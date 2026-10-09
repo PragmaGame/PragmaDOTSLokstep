@@ -157,3 +157,6 @@ sample README, the skills in `Skills~` (they quote API names, defaults and limit
 
 Do not commit or push unless asked: the maintainer reviews and commits changes. The maintainer prefers answers in
 Russian; everything in the repository stays in English.
+
+Commit subjects (the first line of the message) are at most 72 characters: what was done, briefly. Details go
+to the body, after a blank line.
