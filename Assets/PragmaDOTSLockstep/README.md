@@ -1515,6 +1515,8 @@ The hash covers every entity and every unmanaged component of the simulation wor
 bytes, type indices and entity ids (entities are identified by traversal position, and `Entity` fields by the
 position of their target). Not hashed: pointers, blob asset references, managed, shared and chunk components,
 components on system entities, and anything marked `[LockstepChecksumIgnore]` (a component type or a single field).
+Ignored types do not count in the archetype signature either, and neither do the tags Entities adds only in the editor
+(`HideInHierarchy`), so an editor and a player build hash the same state alike; other tag components do count.
 Keep simulation singletons on ordinary entities so they are covered.
 
 **Finding the cause.**

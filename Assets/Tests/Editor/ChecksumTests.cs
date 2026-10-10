@@ -105,6 +105,47 @@ namespace Pragma.Lockstep.Tests
         }
 
         [Test]
+        public void PresentationOnlyTypes_DoNotAffectTheChecksum()
+        {
+            // The editor adds a shared component to every baked entity (a player never has it): the same content baked
+            // for the editor and for a player must hash alike, archetype signature included.
+            Populate(_a.EntityManager);
+            Populate(_b.EntityManager);
+            using (var query = _b.EntityManager.CreateEntityQuery(typeof(ChecksumValue)))
+            {
+                _b.EntityManager.AddSharedComponent(query, new ChecksumSceneData { mask = 1UL << 59 });
+            }
+            AssertSameState(_a.EntityManager, _b.EntityManager);
+        }
+
+        [Test]
+        public void EditorOnlyTags_DoNotAffectTheChecksum()
+        {
+            // Entities hides the world time entity with an internal tag only in the editor: a player build has none.
+            var hideInHierarchy = typeof(World).Assembly.GetType("Unity.Entities.HideInHierarchy", true);
+            Populate(_a.EntityManager);
+            Populate(_b.EntityManager);
+            using (var query = _b.EntityManager.CreateEntityQuery(typeof(ChecksumValue)))
+            {
+                _b.EntityManager.AddComponent(query, ComponentType.FromTypeIndex(TypeManager.GetTypeIndex(hideInHierarchy)));
+            }
+            AssertSameState(_a.EntityManager, _b.EntityManager);
+        }
+
+        [Test]
+        public void TagComponents_AffectTheChecksum()
+        {
+            // On every entity: the chunks stay the same, only the archetype signature tells the worlds apart.
+            Populate(_a.EntityManager);
+            Populate(_b.EntityManager);
+            using (var query = _b.EntityManager.CreateEntityQuery(typeof(ChecksumValue)))
+            {
+                _b.EntityManager.AddComponent<ChecksumTag>(query);
+            }
+            Assert.AreNotEqual(LockstepChecksum.Compute(_a.EntityManager), LockstepChecksum.Compute(_b.EntityManager));
+        }
+
+        [Test]
         public void PaddingBytes_DoNotAffectTheChecksum()
         {
             Populate(_a.EntityManager);

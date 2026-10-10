@@ -20,7 +20,10 @@ namespace Pragma.Lockstep
     /// position in the traversal instead, and <see cref="Entity"/> fields inside components are replaced by that position.</para>
     /// <para>Only bytes that belong to fields are hashed: padding is skipped, as are pointers and blob asset references,
     /// whose addresses differ between machines. Managed, shared and chunk components, and types or fields marked
-    /// <see cref="LockstepChecksumIgnoreAttribute"/>, are ignored; tag components still count through the archetype.</para>
+    /// <see cref="LockstepChecksumIgnoreAttribute"/>, are ignored, in the values and in the archetype signature alike, and
+    /// so are the tags Entities adds only in the editor: an editor and a player build hash the same state alike, although
+    /// the editor puts shared components on baked entities and hides its world time entity. Other tag components count
+    /// through the archetype.</para>
     /// </remarks>
     public static unsafe class LockstepChecksum
     {
@@ -52,6 +55,10 @@ namespace Pragma.Lockstep
         }
 
         private static readonly Dictionary<int, TypeLayout> Layouts = new Dictionary<int, TypeLayout>();
+
+        // Entities tags the world time and system entities with these only in the editor (#if UNITY_EDITOR); they are
+        // internal, hence the names.
+        private static readonly HashSet<string> EditorOnlyTypes = new HashSet<string> { "Unity.Entities.HideInHierarchy" };
 
         public static ulong Compute(EntityManager entityManager, ulong seed = 0) => Compute(entityManager, seed, null);
 
@@ -120,7 +127,12 @@ namespace Pragma.Lockstep
                     hash.Update(count);
                     for (var t = 0; t < layouts.Length; t++)
                     {
-                        hash.Update(layouts[t].stableHash);
+                        // Types the hash ignores stay out of the signature too: content baked for the editor carries
+                        // editor-only shared components, and must hash like the same content baked for a player.
+                        if (layouts[t].hashed)
+                        {
+                            hash.Update(layouts[t].stableHash);
+                        }
                     }
 
                     for (var t = 0; t < layouts.Length; t++)
@@ -286,7 +298,8 @@ namespace Pragma.Lockstep
                             && type.IsValueType
                             && !typeIndex.IsSharedComponentType
                             && !typeIndex.IsChunkComponent
-                            && !type.IsDefined(typeof(LockstepChecksumIgnoreAttribute), false);
+                            && !type.IsDefined(typeof(LockstepChecksumIgnoreAttribute), false)
+                            && !EditorOnlyTypes.Contains(type.FullName);
 
             if (layout.hashed && layout.elementSize > 0)
             {

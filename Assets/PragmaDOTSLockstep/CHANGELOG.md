@@ -136,6 +136,11 @@ and this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An editor and a player build reported a desync on tick 0 with identical state: the checksum's archetype signature
+  counted the types the editor alone adds — the shared `EditorRenderData` on baked entities and the `HideInHierarchy`
+  tag on the world time entity. The signature now lists only the types the checksum hashes (unmanaged components,
+  buffers, tags): shared, managed and chunk components, `[LockstepChecksumIgnore]` types and the editor-only tags of
+  Entities count nowhere. Changes every hash and invalidates the checksums stored in replays.
 - The prefab registry and the scene entities are copied into archetypes created in their order first: the copy alone
   created them in an order that followed the memory of the presentation world, so two clients could start with their
   archetypes in a different order and report a desync on tick 0.

@@ -27,7 +27,8 @@ Related skills: `pragma-lockstep-gameplay` (how to write simulation code correct
 - The hash covers every entity (by traversal position) and every unmanaged component field, including enabled bits.
   `Entity` fields are hashed as the position of their target, so entity ids never matter. Not hashed: padding,
   pointers, blob asset references, managed / shared / chunk components, components on system entities,
-  `[LockstepChecksumIgnore]` types and fields.
+  `[LockstepChecksumIgnore]` types and fields. Ignored types do not count in the archetype signature either, nor do the
+  tags Entities adds only in the editor, so an editor and a player build hash the same state alike.
 - A report at tick T means the states differed at T and matched at the previous checksum tick. The root cause lies
   in between, or in unhashed data (a static, a system field, a managed object) that diverged earlier and leaked into
   components now.

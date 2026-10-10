@@ -50,8 +50,10 @@ The package is unreleased: backward compatibility is not required yet, prefer cl
   position and replaces `Entity` fields with that position; `LockstepEntityId` is the cross-client identity.
 - **The checksum** (`LockstepChecksum`) hashes field bytes only (padding, pointers and blob references skipped),
   visits archetypes in creation order and component types by stable type hash, masks enableable bits, and skips
-  managed, shared and chunk components and `[LockstepChecksumIgnore]`. Any change to it changes every hash and
-  invalidates the checksums stored in replays.
+  managed, shared and chunk components, `[LockstepChecksumIgnore]` and the editor-only tags of Entities, in the values
+  and in the archetype signature alike (the editor puts shared components on baked entities and hides its world time
+  entity, a player build does neither). Any change to it changes every hash and invalidates the checksums stored in
+  replays.
 - **Math is part of the protocol.** `FixedPoint` and `FixedMath` are integer-only and bit-identical in Mono, IL2CPP and Burst.
   Changing a result (rounding, series, constants) changes `FixedPointTests.GOLDEN_HASH`, breaks old replays and
   desyncs mixed builds; do it only on purpose and record it in the CHANGELOG.
